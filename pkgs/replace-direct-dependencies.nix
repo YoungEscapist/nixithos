@@ -8,6 +8,13 @@
 # so the rewritten copy of such a package refers to the original one, and with
 # it to everything that was to be replaced.  Replacing the hash too makes the
 # stray occurrence point at the new path, as it would have pointed at the old.
+#
+# The hash is replaced in UTF-16 (little-endian) as well: Qt programs keep
+# paths fixed at build time as QStringLiteral, UTF-16 in the binary.
+# lxqt-panel looks up its plugins by its own path written so; rewritten in
+# UTF-8 only, it went on looking in the original, which is not in the system,
+# and its panel came up with no plugins at all.  (Nix finds no reference in
+# UTF-16, so the original was never kept alive by it.)
 {
   lib,
   runCommandLocal,
@@ -59,6 +66,10 @@ else
         throw "cannot reconstruct the derivation name from ${drv}";
   in
   runCommandLocal drvName { nativeBuildInputs = [ nix.out ]; } ''
+    # a sed pattern for the UTF-16LE form of an ASCII string
+    utf16() {
+        printf '%s' "$1" | sed 's/./&\\x00/g; s/\\x00$//'
+    }
     createRewriteScript() {
         while [ $# -ne 0 ]; do
             oldBasename="$(basename "$1")"
@@ -71,6 +82,8 @@ else
             echo "s|$oldBasename|$newBasename|g" >> rewrite.sed
             # what is left of the old hash, in strings that are not the name
             echo "s|''${oldBasename:0:32}|''${newBasename:0:32}|g" >> rewrite.sed
+            # ... and the hash in UTF-16, a NUL after every character
+            echo "s|$(utf16 "''${oldBasename:0:32}")|$(utf16 "''${newBasename:0:32}")|g" >> rewrite.sed
         done
     }
     createRewriteScript ${

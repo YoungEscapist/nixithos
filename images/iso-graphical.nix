@@ -1,5 +1,5 @@
 # The live/installation image with a graphical installer: the image of
-# ./iso.nix with NixithOS's own desktop, dwl (../modules/desktop/dwl.nix),
+# ./iso.nix with a light desktop, LXQt on labwc (../modules/desktop/lxqt.nix),
 # started on tty1 for the live user "nixith" (no password), everyday tools,
 # and Calamares made into NixithOS's installer (../pkgs/calamares-nixithos),
 # which starts with the session.  The desktop of the installed system is
@@ -48,12 +48,11 @@ in
   image.baseName = lib.mkOverride 40 "nixithos-graphical-${config.system.nixos.label}-${pkgs.stdenv.hostPlatform.system}";
   isoImage.appendToMenuLabel = " (graphical)";
 
-  # dwl on tty1, where the live user is logged in by itself (./iso.nix)
-  nixithos.desktop.dwl = {
-    enable = true;
-    # the wallpaper, and the installer once the session is there
-    startup = "${lib.getExe pkgs.swaybg} -m fill -i ${config.nixithos.desktop.dwl.wallpaper} & sleep 1; nixithos-installer";
-  };
+  # LXQt on tty1, where the live user is logged in by itself (./iso.nix); the
+  # installer starts with the session (lxqt-session runs /etc/xdg/autostart)
+  nixithos.desktop.lxqt.enable = true;
+  environment.etc."xdg/autostart/nixithos-installer.desktop".source =
+    "${installerEntry}/share/applications/nixithos-installer.desktop";
   nixithos.utilities.enable = true;
 
   # Parallax is built from this tree, not in the binary cache: it is on the
@@ -100,7 +99,7 @@ in
 
   services.getty.helpLine = lib.mkAfter ''
 
-    dwl and the installer are on tty1.  Super+P lists the programs ("Install
-    NixithOS" starts the installer again), Super+Shift+Enter opens a terminal.
+    LXQt and the installer are on tty1.  "Install NixithOS" in the menu
+    (System) starts the installer again.
   '';
 }

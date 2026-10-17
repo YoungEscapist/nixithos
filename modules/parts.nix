@@ -126,6 +126,7 @@ let
     ./services/timesyncd.nix
     ./services/hostname.nix
     ./desktop/dwl.nix
+    ./desktop/lxqt.nix
     ./desktop/desktops.nix
     ./desktop/utilities.nix
   ];
