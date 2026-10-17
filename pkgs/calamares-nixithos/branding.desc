@@ -1,0 +1,32 @@
+---
+componentName:  nixithos
+welcomeStyleCalamares:   false
+welcomeExpandingLogo:   true
+windowExpanding:    normal
+windowSize: 820px,560px
+windowPlacement: center
+sidebar: widget
+navigation: widget
+strings:
+    productName:         NixithOS
+    shortProductName:    NixithOS
+    version:
+    shortVersion:
+    versionedName:       NixithOS
+    shortVersionedName:  NixithOS
+    bootloaderEntryName: NixithOS
+    productUrl:          https://nixos.org/
+    supportUrl:          https://nixos.org/manual/nixos
+    knownIssuesUrl:      https://github.com/NixOS/nixpkgs/issues
+    releaseNotesUrl:     https://nixos.org/manual/nixos/stable/release-notes.html
+images:
+    productIcon:         "nixithos.png"
+    productLogo:         "nixithos.png"
+    productWelcome:      "nixithos-welcome.png"
+style:
+   SidebarBackground:        "#000000"
+   SidebarText:              "#E6E6E6"
+   SidebarTextCurrent:       "#000000"
+   SidebarBackgroundCurrent: "#FFFFFF"
+slideshow:               "show.qml"
+slideshowAPI: 2
