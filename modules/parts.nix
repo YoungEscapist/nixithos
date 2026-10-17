@@ -101,6 +101,7 @@ let
   ours = map (p: lib.setDefaultModuleLocation (toString p) (import p)) [
     ./base.nix
     ./branding.nix
+    ./theme.nix
     ./no-systemd.nix
     ./s6
     ./compat/units.nix

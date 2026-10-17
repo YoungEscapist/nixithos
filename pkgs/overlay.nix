@@ -1,6 +1,19 @@
 # Packages specific to this tree, exposed as `pkgs.nixithos.*`, and the few
 # adjustments to nixpkgs packages it needs.
 final: prev: {
+  # claude-code is a prebuilt binary fetched straight from downloads.claude.ai
+  # by version+checksum (see its package.nix): bumping it does not touch
+  # nixpkgs' own derivation hashes, so it does not cascade into a rebuild of
+  # anything else.  Bump the version/checksum pair here when a newer release
+  # comes out; `curl -s https://downloads.claude.ai/claude-code-releases/<ver>/manifest.json`
+  # has the per-platform checksums.
+  claude-code = prev.claude-code.override {
+    manifest = {
+      version = "2.1.302";
+      platforms."linux-x64".checksum = "60d7eb7f12fbb28a52533fe8be5884097403562aa02dc73991a021c7067e29a5";
+    };
+  };
+
   nixithos = final.lib.makeScope final.newScope (self: {
     # build time: unit files -> s6-rc source
     unitc = self.callPackage ./unitc { };

@@ -24,6 +24,16 @@
   libdisplay-info,
   xwayland,
   dbus,
+  openxr-loader,
+  ffmpeg,
+  mpv,
+  curl,
+  pulseaudio,
+  python3,
+  # a program the session runs alongside the compositor, given the
+  # compositor's pid (NixithOS's: wallpapers, the clipboard's history,
+  # notifications; ../../modules/desktop/desktops.nix)
+  autostart ? null,
 }:
 
 rustPlatform.buildRustPackage (finalAttrs: {
@@ -81,6 +91,18 @@ rustPlatform.buildRustPackage (finalAttrs: {
     substituteInPlace $out/share/wayland-sessions/parallax.desktop \
       --replace-fail /usr/local/bin/parallax-session $out/bin/parallax-session
     install -Dm644 default_config.lua $out/share/parallax/default_config.lua
+    install -Dm644 default_config.ru.lua $out/share/parallax/default_config.ru.lua
+    install -Dm644 dist/shaders/haze.frag $out/share/parallax/shaders/haze.frag
+    # the heart of the `love` gesture, and sharing the desktop from a terminal
+    install -Dm755 dist/plx-heart $out/bin/plx-heart
+    install -Dm755 plx-host $out/bin/plx-host
+    substituteInPlace $out/bin/plx-host --replace-fail '#!/usr/bin/env python3' '#!${python3.interpreter}'
+  ''
+  + lib.optionalString (autostart != null) ''
+    # (exec keeps the pid: the compositor's is ours)
+    substituteInPlace $out/bin/parallax-session \
+      --replace-fail 'exec "$PLX_BINARY" "$@"' '${autostart} $$ &
+    exec "$PLX_BINARY" "$@"'
   '';
 
   # what it opens at run time (EGL and the winit backend), and Xwayland
@@ -90,12 +112,20 @@ rustPlatform.buildRustPackage (finalAttrs: {
         libGL
         libxkbcommon
         wayland
+        # (VR loads libopenxr_loader.so when asked for, Entry::load)
+        openxr-loader
       ]
     } $out/bin/plx-extra
     wrapProgram $out/bin/plx-extra --prefix PATH : ${
       lib.makeBinPath [
         xwayland
         dbus
+        # what it runs itself: ffmpeg (video to guests), mpv and curl (live
+        # and online pictures), pactl (the sound menu)
+        ffmpeg
+        mpv
+        curl
+        pulseaudio
       ]
     }
   '';

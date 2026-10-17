@@ -34,7 +34,34 @@ let
     done
   '';
 
-  parallax = pkgs.callPackage ../../pkgs/parallax { };
+  plx-wall = pkgs.callPackage ../../pkgs/plx-wall { };
+
+  # what the session runs alongside Parallax (../../pkgs/parallax/autostart.sh)
+  parallaxAutostart = pkgs.writeShellApplication {
+    name = "parallax-autostart";
+    runtimeInputs = with pkgs; [
+      coreutils
+      gnugrep
+      dbus
+      wl-clipboard
+      cliphist
+      mako
+      plx-wall
+    ];
+    # (POSIX sh, as it is in the repository; not bash's strict mode)
+    bashOptions = [ ];
+    text = builtins.readFile ../../pkgs/parallax/autostart.sh;
+  };
+
+  parallax = pkgs.callPackage ../../pkgs/parallax { autostart = lib.getExe parallaxAutostart; };
+
+  # Parallax's launcher (Super+S in its configuration): rofi with the
+  # applications, a second press closing it
+  plx-launcher = pkgs.writeShellScriptBin "plx-launcher" ''
+    if ${pkgs.procps}/bin/pkill -x rofi; then exit 0; fi
+    [ $# -eq 0 ] && set -- -show drun
+    exec ${lib.getExe pkgs.rofi} "$@"
+  '';
 
   enabled = lib.filter (name: cfg.${name}.enable) [
     "parallax"
@@ -129,7 +156,16 @@ in
           (lib.getExe pkgs.tuigreet)
           "--time --remember --remember-user-session --asterisks"
           "--sessions ${waylandSessions}/share/wayland-sessions"
-        ];
+        ]
+        # NixithOS's greys (../theme.nix)
+        + lib.optionalString config.nixithos.theme.enable (
+          " "
+          + lib.concatStringsSep " " [
+            "--time-format '%H:%M' --greeting ${lib.escapeShellArg config.system.nixos.distroName}"
+            "--window-padding 2 --container-padding 2"
+            "--theme 'border=darkgray;text=gray;prompt=white;time=darkgray;action=darkgray;button=white;container=black;input=white;greet=white;title=white'"
+          ]
+        );
         # the automatic login: the first session greetd starts, that of the
         # default desktop, run as its .desktop file says
         settings.initial_session = lib.mkIf dmcfg.autoLogin.enable {
@@ -150,14 +186,26 @@ in
     (lib.mkIf cfg.parallax.enable {
       environment.systemPackages = [
         parallax
+        plx-wall
+        plx-launcher
+        pkgs.rofi
         pkgs.foot
         pkgs.fuzzel
         pkgs.wl-clipboard
+        pkgs.cliphist
+        pkgs.mako
+        pkgs.libnotify
         pkgs.grim
         pkgs.slurp
         pkgs.pavucontrol
         pkgs.brightnessctl
+        # its cursor: the default of its configuration, Bibata-Modern-Ice
+        # (without the theme the pointer is invisible)
+        pkgs.bibata-cursors
       ];
+      services.dbus.packages = [ pkgs.mako ];
+      # the icons of its bar and dock, and its glyphs
+      fonts.packages = [ pkgs.nerd-fonts.jetbrains-mono ];
       services.displayManager.sessionPackages = [ parallax ];
       programs.xwayland.enable = true;
       xdg.portal = {
