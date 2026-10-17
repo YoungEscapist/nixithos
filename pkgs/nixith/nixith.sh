@@ -272,7 +272,8 @@ build_system() {
 
     case $action in
         build)
-            [ -n "$rollback" ] && echo "$out"
+            # (an if: as a bare `&&` its false test would be the exit status)
+            if [ -n "$rollback" ]; then echo "$out"; fi
             ;;
         switch | boot)
             if [ -z "$rollback" ]; then
