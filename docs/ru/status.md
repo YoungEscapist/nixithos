@@ -88,6 +88,7 @@
 | ISO (`nix-build -A iso`): загрузка по BIOS и UEFI со знаком NixithOS, живая система, `nixos-generate-config` + `nixos-install` на GPT с systemd-boot, загрузка установленного | вручную в QEMU (16.10) |
 | ISO с dwl (`nix-build -A isoDwl`): Calamares со своим брендингом, «Erase disk» на GPT/UEFI, установленная система входит в dwl; kpmcore ищет программы и в `/run/current-system/sw` (pkgs/overlay.nix) | вручную в QEMU (16.10) |
 | графический ISO (`nix-build -A isoGraphical`): LXQt на labwc, Calamares стартует сам, панель с плагинами (хеши путей в UTF-16 переписываются при замене, `pkgs/replace-direct-dependencies.nix`) | вручную в QEMU (17.10) |
+| консольный установщик (`nix-build -A iso`, `pkgs/nixith-installer`): все шаги по-английски и по-русски, Wi-Fi и кабель через `nmcli`, установка со стиранием диска на GPT/UEFI с Parallax и ly, установленная система загружается и принимает пароль; `console.font` ставится заново, когда видеодрайвер подхватывает консоль (правило udev на `vtcon*`, как 90-vconsole.rules у systemd) | вручную в QEMU (18.10) |
 | `journalctl -g` по тексту сообщения (без учёта регистра, если нет заглавных), код 1 без совпадений; `-t` по имени | `upstream.mumble` |
 
 ## Заведомо не работает

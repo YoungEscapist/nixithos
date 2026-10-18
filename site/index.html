@@ -36,7 +36,7 @@
         <h1>NixOS without&nbsp;systemd</h1>
         <p class="lead">The same nixpkgs packages and the same declarative configuration. s6-rc starts and supervises the system; everything else stays as it is in NixOS.</p>
         <div class="actions">
-          <a class="btn primary" href="#download">Download ISO <small>x86_64</small></a>
+          <a class="btn primary" href="#download">Download ISO <small>1.8 GB</small></a>
           <a class="btn ghost" href="https://github.com/YoungEscapist/nixithos">Source</a>
         </div>
       </div>
@@ -94,36 +94,36 @@
     <section id="install">
       <div class="sec-head">
         <h2>The installer</h2>
-        <p>The live image boots into LXQt on labwc and opens Calamares by itself. What the installed system will have is chosen there.</p>
+        <p>The image starts its installer by itself: a small program in the console, in English or Russian. Fifteen short steps, and nothing is written to the disk until the summary is confirmed.</p>
       </div>
       <div class="shots">
         <figure class="wide">
-          <a href="img/installer-desktop.webp"><img src="img/installer-desktop.webp" width="1026" height="597" alt="The installer's Desktop page, with Parallax selected and its screenshot"></a>
-          <figcaption><b>Desktop.</b> Parallax, GNOME, KDE Plasma, Hyprland, niri, dwl, or none. Each one is a single line in the configuration.</figcaption>
+          <a href="img/tui-welcome.webp"><img src="img/tui-welcome.webp" width="1280" height="800" alt="The installer's welcome screen: the NixithOS mark drawn in characters, the steps on the left, a choice of English or Russian"></a>
+          <figcaption><b>Welcome.</b> The language comes first; the column on the left shows every step and where you are.</figcaption>
         </figure>
         <figure>
-          <a href="img/installer-welcome.webp"><img src="img/installer-welcome.webp" width="1026" height="597" loading="lazy" alt="The installer's welcome page with the NixithOS mark"></a>
-          <figcaption><b>Welcome.</b> The language comes first; the list on the left shows every step.</figcaption>
+          <a href="img/tui-network.webp"><img src="img/tui-network.webp" width="1280" height="800" loading="lazy" alt="The Network step: connected by cable"></a>
+          <figcaption><b>Network.</b> A cable connects by itself; for Wi-Fi pick a network and type its password. The same screen is <code>nixith-net</code> on an installed system.</figcaption>
         </figure>
         <figure>
-          <a href="img/installer-users.webp"><img src="img/installer-users.webp" width="1026" height="597" loading="lazy" alt="The Users page filled in for a demo user"></a>
-          <figcaption><b>Users.</b> Your account, and the same password for root if you want it.</figcaption>
+          <a href="img/tui-timezone.webp"><img src="img/tui-timezone.webp" width="1280" height="800" loading="lazy" alt="The Time zone step with the search narrowed to Berlin"></a>
+          <figcaption><b>Time zone.</b> Type a city to find it; the time there is shown below.</figcaption>
         </figure>
         <figure>
-          <a href="img/installer-login.webp"><img src="img/installer-login.webp" width="1026" height="597" loading="lazy" alt="The Login page, with ly selected"></a>
-          <figcaption><b>Login.</b> ly, greetd with tuigreet, or the plain console. GDM and SDDM are left out because they need systemd.</figcaption>
+          <a href="img/tui-user.webp"><img src="img/tui-user.webp" width="1280" height="800" loading="lazy" alt="The User step filled in for Ada Lovelace"></a>
+          <figcaption><b>User.</b> The login is made from your name (Cyrillic is transliterated); the same password can go to root.</figcaption>
         </figure>
         <figure>
-          <a href="img/installer-shell.webp"><img src="img/installer-shell.webp" width="1026" height="597" loading="lazy" alt="The Shell page, with Bash selected"></a>
-          <figcaption><b>Shell.</b> Bash, Zsh, fish or Nushell for your user.</figcaption>
+          <a href="img/tui-desktop.webp"><img src="img/tui-desktop.webp" width="1280" height="800" loading="lazy" alt="The Desktop step with Parallax selected and described below"></a>
+          <figcaption><b>Desktop.</b> Parallax is on the image; the others are downloaded during the installation.</figcaption>
         </figure>
         <figure>
-          <a href="img/installer-bootloader.webp"><img src="img/installer-bootloader.webp" width="1026" height="597" loading="lazy" alt="The Bootloader page, with systemd-boot selected"></a>
-          <figcaption><b>Boot loader.</b> systemd-boot, Limine, GRUB or rEFInd. BIOS machines always get GRUB.</figcaption>
+          <a href="img/tui-summary.webp"><img src="img/tui-summary.webp" width="1280" height="800" loading="lazy" alt="The Summary step listing every choice and the disk to be erased"></a>
+          <figcaption><b>Summary.</b> Every answer on one screen, and what will be erased.</figcaption>
         </figure>
         <figure>
-          <a href="img/installer-partitions.webp"><img src="img/installer-partitions.webp" width="1026" height="597" loading="lazy" alt="The Partitions page with an empty 30 GiB disk"></a>
-          <figcaption><b>Partitions.</b> Erase a disk, or partition it by hand.</figcaption>
+          <a href="img/tui-install.webp"><img src="img/tui-install.webp" width="1280" height="800" loading="lazy" alt="The Install step finished, in Russian: five stages marked ok and the log below"></a>
+          <figcaption><b>Install.</b> The stages and the log as they go; in QEMU with Parallax it took about 16 minutes.</figcaption>
         </figure>
       </div>
       <div class="choices">
@@ -170,17 +170,21 @@
     <section id="download">
       <div class="sec-head">
         <h2>Download</h2>
-        <p>The graphical ISO is 2.8 GB, more than GitHub allows for one release file.</p>
+        <p>One image for UEFI and BIOS, 1.8 GB. Write it to a USB stick (or put it on Ventoy) and boot from it.</p>
       </div>
       <div class="download">
         <div>
-          <p>A download link is coming soon.</p>
-          <p class="muted">Until then the image builds from the source with one command. Most of it comes from the nixpkgs binary cache.</p>
+          <div class="actions">
+            <a class="btn primary" href="https://github.com/YoungEscapist/nixithos/releases/latest/download/nixithos-26.05-x86_64-linux.iso">Download ISO <small>1.8 GB</small></a>
+            <a class="btn ghost" href="https://github.com/YoungEscapist/nixithos/releases/latest">Release notes</a>
+          </div>
+          <p class="muted" style="margin-top:16px">The checksum is in SHA256SUMS next to the image. The image also builds from the source with one command.</p>
         </div>
-<pre class="term"><span class="p">$ </span>git clone https://github.com/YoungEscapist/nixithos
-<span class="p">$ </span>cd nixithos
-<span class="p">$ </span>nix-build -A isoGraphical
-<span class="c">result/iso/nixithos-graphical-…-x86_64-linux.iso</span></pre>
+<pre class="term"><span class="p">$ </span>sha256sum -c SHA256SUMS
+<span class="p">$ </span>sudo dd if=nixithos-26.05-x86_64-linux.iso \
+      of=/dev/sdX bs=4M status=progress
+<span class="c"># or from the source:</span>
+<span class="p">$ </span>nix-build -A iso</pre>
       </div>
     </section>
 

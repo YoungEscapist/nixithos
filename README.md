@@ -286,14 +286,32 @@ The mark also exists as pictures (`nixithos.branding.artwork`): the
 ## ISO: live system and installation
 
 ```console
-$ nix-build -A iso                  # result/iso/nixithos-26.05…-x86_64-linux.iso
-$ nix-build -A isoGraphical         # …-graphical-…: LXQt and Calamares
+$ nix-build -A iso                  # result/iso/nixithos-26.05…-x86_64-linux.iso (1.8 GB)
+$ nix-build -A isoGraphical         # …-graphical-…: LXQt and Calamares (2.8 GB)
 ```
 
-The console one is the stock minimal NixOS installation image
-([images/iso.nix](images/iso.nix)) on this tree: it boots via BIOS
-(syslinux) and UEFI (GRUB), the menu shows the NixithOS mark, then comes a
-live system with automatic login as `nixith` (no password). To install:
+The main image ([images/iso.nix](images/iso.nix)), the one in the releases,
+is the stock minimal NixOS installation image on this tree with an installer
+of our own in the console: it boots via BIOS (syslinux) and UEFI (GRUB), the
+menu shows the NixithOS mark, then the live user `nixith` (no password) is
+logged in on tty1 and **nixith-installer** starts by itself
+([pkgs/nixith-installer](pkgs/nixith-installer)).
+
+nixith-installer is a small C program over ncurses (about 100 KB) that
+speaks English or Russian. Its steps are those of the Calamares installer
+below, with a network step in front: a simpler nmtui on top of `nmcli`
+(a cable connects by itself, Wi-Fi is a list and a password; `nixith-net`
+starts that step alone, on any system). Nothing is written until the summary
+is confirmed; then [install.sh](pkgs/nixith-installer/install.sh)
+partitions the disk (GPT: a 1 GiB EFI partition, or a BIOS boot partition,
+and ext4 or btrfs for the rest) or takes what is mounted on `/mnt`, writes
+`/etc/nixith/configuration.nix` the way Calamares did, with the passwords as
+yescrypt hashes, and runs `nixith install`, retrying when a download breaks
+off. Parallax is carried on the image, so installing it is not compiling it.
+Checked in QEMU end to end (UEFI, Parallax, ly): the installation, booting
+the installed system, logging in with the password given in the installer.
+
+By hand, without the installer:
 
 ```console
 # nixith generate-config --root /mnt

@@ -278,14 +278,31 @@ os-release) и фоны меню загрузки ISO.
 ## ISO: живая система и установка
 
 ```console
-$ nix-build -A iso                  # result/iso/nixithos-26.05…-x86_64-linux.iso
-$ nix-build -A isoGraphical         # …-graphical-…: LXQt и Calamares
+$ nix-build -A iso                  # result/iso/nixithos-26.05…-x86_64-linux.iso (1,8 ГБ)
+$ nix-build -A isoGraphical         # …-graphical-…: LXQt и Calamares (2,8 ГБ)
 ```
 
-Консольный — штатный минимальный установочный образ NixOS
-([images/iso.nix](images/iso.nix)) на этом дереве: грузится по BIOS
-(syslinux) и UEFI (GRUB), в меню — знак NixithOS, дальше живая система с
-автовходом `nixith` (без пароля). Установка:
+Основной образ ([images/iso.nix](images/iso.nix)), тот, что в релизах, —
+штатный минимальный установочный образ NixOS на этом дереве со своим
+установщиком в консоли: грузится по BIOS (syslinux) и UEFI (GRUB), в меню —
+знак NixithOS, дальше на tty1 сам входит живой пользователь `nixith` (без
+пароля) и сам запускается **nixith-installer**
+([pkgs/nixith-installer](pkgs/nixith-installer)).
+
+nixith-installer — небольшая программа на C поверх ncurses (около 100 КБ),
+говорит по-английски и по-русски. Шаги — те же, что у Calamares ниже, а
+впереди шаг сети: упрощённый nmtui поверх `nmcli` (кабель подключается сам,
+Wi-Fi — список и пароль; `nixith-net` запускает этот шаг отдельно, в любой
+системе). До подтверждения итога ничего не записывается; потом
+[install.sh](pkgs/nixith-installer/install.sh) размечает диск (GPT: EFI-раздел
+на 1 ГиБ или раздел BIOS boot, остальное — ext4 или btrfs) или берёт то, что
+смонтировано в `/mnt`, пишет `/etc/nixith/configuration.nix` так же, как
+Calamares, пароли — хешами yescrypt, и запускает `nixith install`, повторяя
+его, если скачивание оборвалось. Parallax лежит на образе, так что его
+установка — не компиляция. Проверено в QEMU целиком (UEFI, Parallax, ly):
+установка, загрузка установленной системы, вход с паролем из установщика.
+
+Вручную, без установщика:
 
 ```console
 # nixith generate-config --root /mnt

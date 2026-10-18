@@ -36,7 +36,7 @@
         <h1>NixOS без&nbsp;systemd</h1>
         <p class="lead">Те же пакеты nixpkgs и та же декларативная конфигурация. Систему запускает и держит s6-rc, а всё остальное остаётся как в NixOS.</p>
         <div class="actions">
-          <a class="btn primary" href="#download">Скачать ISO <small>x86_64</small></a>
+          <a class="btn primary" href="#download">Скачать ISO <small>1,8 ГБ</small></a>
           <a class="btn ghost" href="https://github.com/YoungEscapist/nixithos">Исходники</a>
         </div>
       </div>
@@ -94,36 +94,36 @@
     <section id="install">
       <div class="sec-head">
         <h2>Установщик</h2>
-        <p>Живой образ загружается в LXQt на labwc и сам открывает Calamares. Что будет стоять в системе, выбирается там.</p>
+        <p>Образ сам запускает установщик: небольшую программу в консоли, на русском или английском. Пятнадцать коротких шагов, и до подтверждения итога на диск ничего не пишется.</p>
       </div>
       <div class="shots">
         <figure class="wide">
-          <a href="../img/installer-desktop.webp"><img src="../img/installer-desktop.webp" width="1026" height="597" alt="Страница выбора рабочего стола, выбран Parallax и показан его снимок"></a>
-          <figcaption><b>Рабочий стол.</b> Parallax, GNOME, KDE Plasma, Hyprland, niri, dwl или без стола. Каждый включается одной строкой конфига.</figcaption>
+          <a href="../img/tui-welcome.webp"><img src="../img/tui-welcome.webp" width="1280" height="800" alt="Приветствие установщика: знак NixithOS символами, шаги слева, выбор языка"></a>
+          <figcaption><b>Приветствие.</b> Сначала язык; колонка слева показывает все шаги и где вы сейчас.</figcaption>
         </figure>
         <figure>
-          <a href="../img/installer-welcome.webp"><img src="../img/installer-welcome.webp" width="1026" height="597" loading="lazy" alt="Приветствие установщика со знаком NixithOS"></a>
-          <figcaption><b>Приветствие.</b> Сначала язык; слева список всех шагов.</figcaption>
+          <a href="../img/tui-network.webp"><img src="../img/tui-network.webp" width="1280" height="800" loading="lazy" alt="Шаг «Сеть»: подключено по кабелю"></a>
+          <figcaption><b>Сеть.</b> Кабель подключается сам; для Wi-Fi выберите сеть и введите пароль. В установленной системе тот же экран — <code>nixith-net</code>.</figcaption>
         </figure>
         <figure>
-          <a href="../img/installer-users.webp"><img src="../img/installer-users.webp" width="1026" height="597" loading="lazy" alt="Страница пользователей, заполненная для демонстрационного пользователя"></a>
-          <figcaption><b>Пользователи.</b> Твоя учётная запись и, по желанию, тот же пароль для root.</figcaption>
+          <a href="../img/tui-timezone.webp"><img src="../img/tui-timezone.webp" width="1280" height="800" loading="lazy" alt="Шаг «Часовой пояс», поиск сужен до Берлина"></a>
+          <figcaption><b>Часовой пояс.</b> Наберите город, чтобы найти его; ниже — который там час.</figcaption>
         </figure>
         <figure>
-          <a href="../img/installer-login.webp"><img src="../img/installer-login.webp" width="1026" height="597" loading="lazy" alt="Страница выбора менеджера входа, выбран ly"></a>
-          <figcaption><b>Вход.</b> ly, greetd с tuigreet или обычная консоль. GDM и SDDM не предлагаются: им нужен systemd.</figcaption>
+          <a href="../img/tui-user.webp"><img src="../img/tui-user.webp" width="1280" height="800" loading="lazy" alt="Шаг «Пользователь», заполненный для Ады Лавлейс"></a>
+          <figcaption><b>Пользователь.</b> Логин составляется из имени (кириллица транслитерируется); тот же пароль можно дать root.</figcaption>
         </figure>
         <figure>
-          <a href="../img/installer-shell.webp"><img src="../img/installer-shell.webp" width="1026" height="597" loading="lazy" alt="Страница выбора оболочки, выбран Bash"></a>
-          <figcaption><b>Оболочка.</b> Bash, Zsh, fish или Nushell для твоего пользователя.</figcaption>
+          <a href="../img/tui-desktop.webp"><img src="../img/tui-desktop.webp" width="1280" height="800" loading="lazy" alt="Шаг «Рабочий стол», выбран Parallax с описанием ниже"></a>
+          <figcaption><b>Рабочий стол.</b> Parallax есть на образе, остальные скачиваются во время установки.</figcaption>
         </figure>
         <figure>
-          <a href="../img/installer-bootloader.webp"><img src="../img/installer-bootloader.webp" width="1026" height="597" loading="lazy" alt="Страница выбора загрузчика, выбран systemd-boot"></a>
-          <figcaption><b>Загрузчик.</b> systemd-boot, Limine, GRUB или rEFInd. На BIOS всегда ставится GRUB.</figcaption>
+          <a href="../img/tui-summary.webp"><img src="../img/tui-summary.webp" width="1280" height="800" loading="lazy" alt="Шаг «Итог»: все ответы и диск, который будет стёрт"></a>
+          <figcaption><b>Итог.</b> Все ответы на одном экране и то, что будет стёрто.</figcaption>
         </figure>
         <figure>
-          <a href="../img/installer-partitions.webp"><img src="../img/installer-partitions.webp" width="1026" height="597" loading="lazy" alt="Страница разметки с пустым диском на 30 ГиБ"></a>
-          <figcaption><b>Разметка.</b> Стереть диск целиком или разметить вручную.</figcaption>
+          <a href="../img/tui-install.webp"><img src="../img/tui-install.webp" width="1280" height="800" loading="lazy" alt="Шаг «Установка» завершён: пять этапов отмечены ok, ниже журнал"></a>
+          <figcaption><b>Установка.</b> Этапы и журнал по ходу дела; в QEMU с Parallax заняла около 16 минут.</figcaption>
         </figure>
       </div>
       <div class="choices">
@@ -170,17 +170,21 @@
     <section id="download">
       <div class="sec-head">
         <h2>Скачать</h2>
-        <p>Графический ISO весит 2,8 ГБ, это больше, чем GitHub принимает в один файл релиза.</p>
+        <p>Один образ для UEFI и BIOS, 1,8 ГБ. Запишите его на флешку (или положите на Ventoy) и загрузитесь с неё.</p>
       </div>
       <div class="download">
         <div>
-          <p>Ссылка на скачивание скоро появится.</p>
-          <p class="muted">Пока образ можно собрать из исходников одной командой. Почти всё скачается из кэша nixpkgs.</p>
+          <div class="actions">
+            <a class="btn primary" href="https://github.com/YoungEscapist/nixithos/releases/latest/download/nixithos-26.05-x86_64-linux.iso">Скачать ISO <small>1,8 ГБ</small></a>
+            <a class="btn ghost" href="https://github.com/YoungEscapist/nixithos/releases/latest">О выпуске</a>
+          </div>
+          <p class="muted" style="margin-top:16px">Контрольная сумма — в SHA256SUMS рядом с образом. Образ можно и собрать из исходников одной командой.</p>
         </div>
-<pre class="term"><span class="p">$ </span>git clone https://github.com/YoungEscapist/nixithos
-<span class="p">$ </span>cd nixithos
-<span class="p">$ </span>nix-build -A isoGraphical
-<span class="c">result/iso/nixithos-graphical-…-x86_64-linux.iso</span></pre>
+<pre class="term"><span class="p">$ </span>sha256sum -c SHA256SUMS
+<span class="p">$ </span>sudo dd if=nixithos-26.05-x86_64-linux.iso \
+      of=/dev/sdX bs=4M status=progress
+<span class="c"># или из исходников:</span>
+<span class="p">$ </span>nix-build -A iso</pre>
       </div>
     </section>
 

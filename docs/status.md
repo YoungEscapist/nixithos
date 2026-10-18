@@ -88,6 +88,7 @@ The suite is twelve tests (ten of our own and two runs of the same `boot` and
 | ISO (`nix-build -A iso`): BIOS and UEFI boot with the NixithOS mark, a live system, `nixos-generate-config` + `nixos-install` on GPT with systemd-boot, booting the installed system | by hand in QEMU (16.10) |
 | ISO with dwl (`nix-build -A isoDwl`): Calamares with its own branding, "Erase disk" on GPT/UEFI, the installed system logs into dwl; kpmcore looks for programs in `/run/current-system/sw` too (pkgs/overlay.nix) | by hand in QEMU (16.10) |
 | graphical ISO (`nix-build -A isoGraphical`): LXQt on labwc, Calamares starts by itself, the panel with its plugins (path hashes in UTF-16 are rewritten by the replacement, `pkgs/replace-direct-dependencies.nix`) | by hand in QEMU (17.10) |
+| the console installer (`nix-build -A iso`, `pkgs/nixith-installer`): every step in English and Russian, Wi-Fi/cable through `nmcli`, erase-disk install on GPT/UEFI with Parallax and ly, the installed system boots and takes the password; `console.font` set again when the graphics driver takes the console over (a udev rule on `vtcon*`, as systemd's 90-vconsole.rules) | by hand in QEMU (18.10) |
 | `journalctl -g` on the message text (case-insensitive unless there are capitals), exit code 1 when nothing matches; `-t` by name | `upstream.mumble` |
 
 ## Known not to work
