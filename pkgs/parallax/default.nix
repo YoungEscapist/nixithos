@@ -43,8 +43,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
   src = fetchFromGitHub {
     owner = "YoungEscapist";
     repo = "parallax-wm";
-    rev = "edc1fd9752b17f1918fd3d2f3cb9f760b3e51e82";
-    hash = "sha256-Kbn7rDCqqINGgLWCkhASXi7K72i1CrBZPXvYFVPm7z4=";
+    rev = "b2a04bfa99928f11c599a3ea83198b40ec77aaba";
+    hash = "sha256-IYgMwtSfU1fnWZKkqdSqMwzfFM3M/QpR5kZ0JLN9K1g=";
   };
 
   cargoHash = "sha256-QbbQI84MnObdbDjqkzY3cfJkIelhP1Ihvc3AE5q4mmY=";
