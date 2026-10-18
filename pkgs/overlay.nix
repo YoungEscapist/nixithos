@@ -36,6 +36,8 @@ final: prev: {
     userManager = self.callPackage ./user-manager { };
     # what `nixos-rebuild switch` runs on the target
     switch-to-configuration = self.callPackage ./switch-to-configuration { };
+    # the installer in the console, and nixith-net
+    installer = self.callPackage ./nixith-installer { };
   });
 
   # s6-linux-init-maker gives the catch-all log directory the setgid bit.  The

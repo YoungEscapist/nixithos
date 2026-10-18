@@ -90,6 +90,21 @@ in
 {
   options.nixithos.desktop = {
     parallax.enable = enableOption "Parallax (a Wayland compositor with an infinite canvas)";
+    parallax.builtPackages = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      readOnly = true;
+      internal = true;
+      default = [
+        parallax
+        plx-wall
+        plx-launcher
+      ];
+      description = ''
+        What of Parallax's is built here rather than taken from the NixOS
+        binary cache: the installation image carries it, so that installing
+        Parallax is not compiling it.
+      '';
+    };
     gnome.enable = enableOption "GNOME";
     plasma.enable = enableOption "KDE Plasma 6";
     hyprland.enable = enableOption "Hyprland";

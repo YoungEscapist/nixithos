@@ -10,7 +10,15 @@
   ...
 }:
 {
-  imports = [ "${modulesPath}/installer/cd-dvd/installation-cd-minimal.nix" ];
+  imports = [
+    "${modulesPath}/installer/cd-dvd/installation-cd-minimal.nix"
+    {
+      # (./iso-graphical.nix starts Calamares instead)
+      options.nixithos.liveInstaller = lib.mkEnableOption "the console installer on tty1" // {
+        default = true;
+      };
+    }
+  ];
 
   image.baseName = lib.mkForce "nixithos-${config.system.nixos.label}-${pkgs.stdenv.hostPlatform.system}";
   # (the label the boot menu finds the image by: at most 32 characters)
@@ -77,16 +85,38 @@
   # built from the tree, not changed in place)
   installer.cloneConfig = false;
 
+  # The installer (../pkgs/nixith-installer) starts by itself on tty1, once a
+  # boot; quitting it leaves a shell there, and `sudo nixith-installer` starts
+  # it again.
+  environment.systemPackages = [ pkgs.nixithos.installer ];
+  environment.loginShellInit = lib.mkIf config.nixithos.liveInstaller ''
+    if [ "$(tty)" = /dev/tty1 ] && [ "$(id -un)" = nixith ] && [ ! -e /run/nixith-installer.started ]; then
+      sudo touch /run/nixith-installer.started
+      sudo nixith-installer
+    fi
+  '';
+
+  # A console font with Cyrillic and the box-drawing characters of the
+  # installer.
+  console.font = "ter-v16n";
+  console.packages = [ pkgs.terminus_font ];
+  console.earlySetup = true;
+
+  # Parallax is built by this tree and not in the NixOS binary cache: the
+  # image carries it, so that installing it is not compiling it.
+  isoImage.storeContents = config.nixithos.desktop.parallax.builtPackages;
+
   services.getty.helpLine = lib.mkForce ''
     The "nixith" and "root" accounts have empty passwords.
+
+    To install NixithOS: `sudo nixith-installer`.  To connect to a network:
+    `nixith-net` (or `nmtui`).
 
     To log in over ssh you must set a password for either "nixith" or "root"
     with `passwd` (prefix with `sudo` for "root"), or add your public key to
     /home/nixith/.ssh/authorized_keys or /root/.ssh/authorized_keys.
 
-    To set up a wireless connection, run `nmtui`.
-
-    To install NixithOS: partition and mount the disk on /mnt, then
+    To install by hand: partition and mount the disk on /mnt, then
     `sudo nixith generate-config --root /mnt`, edit
     /mnt/etc/nixith/configuration.nix and `sudo nixith install`.
   '';

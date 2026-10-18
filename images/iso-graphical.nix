@@ -51,6 +51,7 @@ in
   # LXQt on tty1, where the live user is logged in by itself (./iso.nix); the
   # installer starts with the session (lxqt-session runs /etc/xdg/autostart)
   nixithos.desktop.lxqt.enable = true;
+  nixithos.liveInstaller = false;
   environment.etc."xdg/autostart/nixithos-installer.desktop".source =
     "${installerEntry}/share/applications/nixithos-installer.desktop";
   nixithos.utilities.enable = true;
