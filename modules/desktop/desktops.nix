@@ -213,6 +213,14 @@ in
         extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
         config.parallax.default = [ "gtk" ];
       };
+      # its Bluetooth menu (Super+Shift+B) talks to bluetoothd over the
+      # system bus; Experimental for BatteryProviderManager1, through which
+      # wireplumber gives the charge of headsets
+      hardware.bluetooth = {
+        enable = lib.mkDefault true;
+        powerOnBoot = lib.mkDefault true;
+        settings.General.Experimental = lib.mkDefault true;
+      };
     })
 
     (lib.mkIf cfg.gnome.enable {

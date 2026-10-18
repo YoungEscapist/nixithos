@@ -34,5 +34,17 @@
         };
       };
     })
+
+    # libpulse starts a pulseaudio of its own (autospawn) when no server
+    # answers, and leaves that to socket activation only where sd_booted()
+    # says systemd runs.  Here it never does: a pactl before PipeWire's
+    # first start spawned pulseaudio, which took the socket pulse/native
+    # pipewire-pulse.socket was listening on for itself and removed it on
+    # exit, and the PulseAudio side of PipeWire never came up.
+    (lib.mkIf (config.services.pipewire.enable && config.services.pipewire.pulse.enable) {
+      environment.etc."pulse/client.conf".text = lib.mkDefault ''
+        autospawn = no
+      '';
+    })
   ];
 }
