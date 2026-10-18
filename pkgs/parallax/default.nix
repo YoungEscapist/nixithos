@@ -38,13 +38,13 @@
 
 rustPlatform.buildRustPackage (finalAttrs: {
   pname = "parallax";
-  version = "0.1.0-unstable-2026-10-12";
+  version = "0.1.0-unstable-2026-10-18";
 
   src = fetchFromGitHub {
     owner = "YoungEscapist";
     repo = "parallax-wm";
-    rev = "263701090e8b6dd85527d487a07d538c04503cd7";
-    hash = "sha256-KBK65f5sLyezClTohYlzYcuoHVJAcfIkxcHHz2EsIis=";
+    rev = "edc1fd9752b17f1918fd3d2f3cb9f760b3e51e82";
+    hash = "sha256-Kbn7rDCqqINGgLWCkhASXi7K72i1CrBZPXvYFVPm7z4=";
   };
 
   cargoHash = "sha256-QbbQI84MnObdbDjqkzY3cfJkIelhP1Ihvc3AE5q4mmY=";

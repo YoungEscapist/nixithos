@@ -20,13 +20,13 @@
 
 rustPlatform.buildRustPackage {
   pname = "plx-wall";
-  version = "0.1.0-unstable-2026-10-08";
+  version = "0.1.0-unstable-2026-10-18";
 
   src = fetchFromGitHub {
     owner = "YoungEscapist";
     repo = "plx-wall";
-    rev = "5be87f7f37c88d012b5bcca23cb1dc06c1c807a9";
-    hash = "sha256-DPAo/4tyKbTZLe2SFzcNfZzEejjNSun3meCPvyKNXxA=";
+    rev = "23730924d8598b04bb0d99fd60c41b222b4b8d10";
+    hash = "sha256-WAEFegRQ7beKzxFKHo+eJirJ/qn0SvT1Ek30aRO+0p0=";
   };
 
   cargoHash = "sha256-GHLewEOilCdC32bJ+nFAldkx31TxUmBITsvUVEMtQoQ=";
