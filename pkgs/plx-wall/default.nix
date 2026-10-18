@@ -51,8 +51,14 @@ rustPlatform.buildRustPackage {
   # what it runs: ffmpeg/ffprobe for thumbnails and previews, curl for the
   # online sources, nice, pkill; zenity to pick a file of one's own (rofi or
   # fuzzel, for a list, are found in the session's PATH)
+  #
+  # The program itself goes to libexec under its own name: wrapProgram would
+  # rename it to .plx-wall-wrapped, the process would be called that, and
+  # Parallax's binds (Super+W: `pkill -USR2 -x plx-wall`) would find nothing.
   postFixup = ''
-    wrapProgram $out/bin/plx-wall \
+    mkdir -p $out/libexec/plx-wall
+    mv $out/bin/plx-wall $out/libexec/plx-wall/plx-wall
+    makeWrapper $out/libexec/plx-wall/plx-wall $out/bin/plx-wall \
       --suffix PATH : ${
         lib.makeBinPath [
           ffmpeg
