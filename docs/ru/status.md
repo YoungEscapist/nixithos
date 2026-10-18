@@ -1,5 +1,7 @@
 # Состояние
 
+[English](../status.md) · **Русский**
+
 Проверено тестами в QEMU (`nix-build -A tests.<имя>`), nixpkgs `nixos-26.05`.
 Набор — двенадцать тестов (десять своих и два прогона тех же `boot` и `units`
 через `nixosModules.default`), все проходят. `tests.rebuild` (`boot` в режиме
@@ -85,6 +87,7 @@
 | циклы `Requires=`/`BindsTo=` без `After=` рвутся по неупорядоченному ребру (сокеты cockpit `BindsTo=cockpit.service`); система без Nix (`nix.enable = false`) собирается и в режиме `replace` | `upstream.without-nix` |
 | ISO (`nix-build -A iso`): загрузка по BIOS и UEFI со знаком NixithOS, живая система, `nixos-generate-config` + `nixos-install` на GPT с systemd-boot, загрузка установленного | вручную в QEMU (16.10) |
 | ISO с dwl (`nix-build -A isoDwl`): Calamares со своим брендингом, «Erase disk» на GPT/UEFI, установленная система входит в dwl; kpmcore ищет программы и в `/run/current-system/sw` (pkgs/overlay.nix) | вручную в QEMU (16.10) |
+| графический ISO (`nix-build -A isoGraphical`): LXQt на labwc, Calamares стартует сам, панель с плагинами (хеши путей в UTF-16 переписываются при замене, `pkgs/replace-direct-dependencies.nix`) | вручную в QEMU (17.10) |
 | `journalctl -g` по тексту сообщения (без учёта регистра, если нет заглавных), код 1 без совпадений; `-t` по имени | `upstream.mumble` |
 
 ## Заведомо не работает
@@ -101,7 +104,7 @@
 | тесты на `systemd.network.*` (rkvm) | нет systemd-networkd |
 | `system.etc.overlay` (userborn-static) | требует `boot.initrd.systemd` |
 | контейнеры `containers.*` (rstp, ndppd) | nspawn |
-| программы, которые говорят с самим systemd по D-Bus (`org.freedesktop.systemd1`: временные юниты, scope с делегированием cgroup — benchexec через pystemd) | API менеджера systemd; на шине сеанса с GNOME есть его часть — `GetUnit`, `Start/Stop/RestartUnit`, `ResetFailed`, окружение ([systemd1-bus](../pkgs/systemd-shim/systemd1-bus.py)), этого хватает gnome-session 50 |
+| программы, которые говорят с самим systemd по D-Bus (`org.freedesktop.systemd1`: временные юниты, scope с делегированием cgroup — benchexec через pystemd) | API менеджера systemd; на шине сеанса с GNOME есть его часть — `GetUnit`, `Start/Stop/RestartUnit`, `ResetFailed`, окружение ([systemd1-bus](../../pkgs/systemd-shim/systemd1-bus.py)), этого хватает gnome-session 50 |
 | тесты функций systemd: pstore, coredump, sysusers, repart | это не init |
 
 ## Не сделано

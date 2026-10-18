@@ -1,5 +1,7 @@
 # NixithOS
 
+[English](README.md) · **Русский** · [сайт](https://youngescapist.github.io/nixithos/ru/)
+
 <p align="center"><img src="branding/nixithos.png" alt="NixithOS" width="420"></p>
 
 NixOS, в котором нет systemd: PID 1 — `s6-linux-init`, сервисами управляет
@@ -78,7 +80,7 @@ systemd — так написаны две тысячи модулей. Выбр
 (`systemctl start`, переключение конфигурации, выключение), восстанавливается
 «рангом» — числом, которое растёт вдоль каждого `After=`.
 
-Подробнее — в [docs/design.md](docs/design.md).
+Подробнее — в [docs/ru/design.md](docs/ru/design.md).
 
 ## Что вместо чего
 
@@ -136,7 +138,7 @@ systemd не запускается, но пакеты nixpkgs собраны с
 `resolved`, `machined`, `homed`, `nspawn`, `oomd`, `repart`, `sysupdate`,
 `journald` как структурированный журнал, `systemd-cryptsetup` и `initrd` на
 systemd. Опции этих модулей на месте (чужие модули их читают), реализации
-нет; чем что заменено — таблица выше и [docs/status.md](docs/status.md).
+нет; чем что заменено — таблица выше и [docs/ru/status.md](docs/ru/status.md).
 `networking.useNetworkd` принудительно выключается: интерфейсы, адреса и
 маршруты из `networking.*` настраивает скриптовая сеть, а ручной
 `systemd.network.*` применять некому (будет предупреждение).
@@ -198,7 +200,7 @@ flake), из которого собрана, с деревом и nixpkgs, ко
 ```nix
 {
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-  inputs.nixithos.url = "github:…/nixithos";
+  inputs.nixithos.url = "github:YoungEscapist/nixithos";
   inputs.nixithos.inputs.nixpkgs.follows = "nixpkgs";
 
   outputs = { nixpkgs, nixithos, ... }: {
@@ -239,27 +241,27 @@ flake), из которого собрана, с деревом и nixpkgs, ко
 [branding/logo.txt](branding/logo.txt):
 
 ```
-                     .
-                     :
-             ____    |    ____
-                 \   |   /
-                  \  |  /
-        _____      \   /      _____
-             \      \ /      /
-              \   ___|___   /
-              /  /       \  \
-             /  /         \  \
-. --- ------<  <           >  >------ --- .
-             \  \         /  /
-              \  \_______/  /
-              /      |      \
-        _____/      / \      \_____
-                   /   \
-                  /  |  \
-             ____/   |   \____
-                     |
-                     :
-                     '
+                        .
+                        :
+             _____      |      _____
+                  \     |     /
+                    \   |   /
+        ______       \     /       ______
+              \        \ /        /
+                \    ___|___    /
+                /   /       \   \
+              /    /         \    \
+. --- -------<    <           >    >------- --- .
+              \    \         /    /
+                \   \_______/   /
+                /       |       \
+        ______/        / \        \______
+                     /     \
+                    /   |   \
+             _____/     |     \_____
+                        |
+                        :
+                        '
 ```
 
 `fastfetch` показывает его сам: в системе есть
@@ -277,7 +279,7 @@ os-release) и фоны меню загрузки ISO.
 
 ```console
 $ nix-build -A iso                  # result/iso/nixithos-26.05…-x86_64-linux.iso
-$ nix-build -A isoGraphical         # …-graphical-…: dwl и Calamares
+$ nix-build -A isoGraphical         # …-graphical-…: LXQt и Calamares
 ```
 
 Консольный — штатный минимальный установочный образ NixOS
@@ -296,10 +298,11 @@ $ nix-build -A isoGraphical         # …-graphical-…: dwl и Calamares
 systemd-boot, загрузка установленной системы.
 
 Графический — [images/iso-graphical.nix](images/iso-graphical.nix): живая
-система с dwl на tty1 (автовход `nixith` без пароля), и вместе с ней
+система с LXQt на labwc на tty1 (автовход `nixith` без пароля,
+[modules/desktop/lxqt.nix](modules/desktop/lxqt.nix)), и вместе с ней
 открывается графический установщик — Calamares со знаком и слайдами NixithOS
 ([pkgs/calamares-nixithos](pkgs/calamares-nixithos)); закрытый установщик
-снова запускается из списка программ (Super+P, «Install NixithOS»).
+снова запускается из меню («Система» → «Install NixithOS»).
 
 Шаги установщика: язык и часовой пояс, раскладка, пользователь, затем то,
 что будет стоять в системе:
@@ -386,7 +389,7 @@ $ cat /run/uncaught-logs/current    # лог загрузки и всего, у 
 
 ## Чего пока нет
 
-См. [docs/status.md](docs/status.md). Коротко: фильтры системных вызовов
+См. [docs/ru/status.md](docs/ru/status.md). Коротко: фильтры системных вызовов
 (`SystemCallFilter=`, `RestrictAddressFamilies=` — остальная песочница
 работает, список непримёненного в `report.txt` базы), `.automount`,
 экземпляры шаблонов, создаваемые на ходу (`systemctl start foo@new`, если ни
