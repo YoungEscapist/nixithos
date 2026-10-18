@@ -129,6 +129,15 @@ in
 
 {
   config = {
+    # A console that appears later (the graphics driver's framebuffer taking
+    # over from the firmware's) starts with the kernel's 256-glyph font and
+    # the default keymap: set it up again, as systemd's 90-vconsole.rules
+    # does.  Without it console.font (Cyrillic, say) was lost on every boot
+    # where the driver came after vconsole-setup.
+    services.udev.extraRules = ''
+      ACTION=="add", SUBSYSTEM=="vtconsole", KERNEL=="vtcon*", RUN+="${vconsoleSetup}"
+    '';
+
     systemd.targets = {
       # ---- boot ------------------------------------------------------------
       sysinit = target "System Initialization" {
