@@ -1880,6 +1880,14 @@ cmd_socket_up() {
     run_list start_post 1 || rc=$?
   fi
   if (( rc == 0 )); then
+    # A restart of the socket alone (systemctl restart X.socket) gives new
+    # sockets, while what waits on them for the service (the -activate atom,
+    # cmd_socket_activate) still holds the old ones: whatever came on the new
+    # ones queued up and the service was never started.  It takes them again.
+    if [[ -d $RT_SCANDIR/$U_ATOM-activate ]] &&
+        [[ $(s6-svstat -o up "$RT_SCANDIR/$U_ATOM-activate" 2>/dev/null) == true ]]; then
+      s6-svc -K "$RT_SCANDIR/$U_ATOM-activate"
+    fi
     set_state active listening
   else
     set_state failed resources
