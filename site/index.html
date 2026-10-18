@@ -1,178 +1,30 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="NixithOS: NixOS без systemd, на s6-rc. Те же пакеты nixpkgs и та же конфигурация.">
-<link rel="icon" type="image/png" href="nixithos.png">
 <title>NixithOS</title>
+<meta name="description" content="NixithOS: NixOS without systemd, on s6-rc. The same nixpkgs packages and the same configuration.">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="alternate" hreflang="en" href="https://youngescapist.github.io/nixithos/">
+<link rel="alternate" hreflang="ru" href="https://youngescapist.github.io/nixithos/ru/">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
-<style>
-/* Layout: монохромная инженерная страница; знак слева-сверху как чертёж, дальше секции одной колонкой ~70ch с таблицей и терминалом */
-:root{
-  --ground:#eef0f2;
-  --surface:#ffffff;
-  --ink:#15181c;
-  --muted:#5b636d;
-  --line:#c9ced5;
-  --accent:#2f3a46;
-  --term:#14171b;
-  --term-ink:#d7dce2;
-  --term-dim:#7d8792;
-  --font-display:"Unbounded", "Golos Text", system-ui, sans-serif;
-  --font-body:"Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono:"JetBrains Mono", ui-monospace, "DejaVu Sans Mono", monospace;
-  --measure:68ch;
-}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    color-scheme:dark;
-    --ground:#101215;
-    --surface:#171a1e;
-    --ink:#e6e9ed;
-    --muted:#98a1ab;
-    --line:#2b3037;
-    --accent:#c4ccd6;
-    --term:#0b0d0f;
-    --term-ink:#d7dce2;
-    --term-dim:#6c7681;
-  }
-}
-:root[data-theme="dark"]{
-  color-scheme:dark;
-  --ground:#101215;
-  --surface:#171a1e;
-  --ink:#e6e9ed;
-  --muted:#98a1ab;
-  --line:#2b3037;
-  --accent:#c4ccd6;
-  --term:#0b0d0f;
-  --term-ink:#d7dce2;
-  --term-dim:#6c7681;
-}
-
-*{box-sizing:border-box}
-body{
-  margin:0;
-  background:var(--ground);
-  color:var(--ink);
-  font-family:var(--font-body);
-  font-size:17px;
-  line-height:1.6;
-  padding-left:max(16px, env(safe-area-inset-left, 0px));
-  padding-right:max(16px, env(safe-area-inset-right, 0px));
-}
-.wrap{max-width:1040px;margin:0 auto}
-a{color:var(--ink);text-underline-offset:3px;text-decoration-color:var(--line)}
-a:hover{text-decoration-color:var(--ink)}
-a:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
-h1,h2,h3{font-family:var(--font-display);font-weight:700;text-wrap:balance;margin:0;line-height:1.15}
-p{margin:0}
-code{font-family:var(--font-mono);font-size:.88em}
-
-/* шапка */
-header.top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-block:22px;border-bottom:1px solid var(--line)}
-.brand{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-weight:500;font-size:15px;letter-spacing:.02em;text-decoration:none}
-.brand svg{width:26px;height:26px}
-nav ul{list-style:none;margin:0;padding:0;display:flex;gap:22px;flex-wrap:wrap;font-size:15px}
-nav a{text-decoration:none;color:var(--muted)}
-nav a:hover{color:var(--ink)}
-
-/* герой */
-.hero{display:grid;grid-template-columns:1.25fr .9fr;gap:48px;align-items:center;padding-block:72px 64px}
-.eyebrow{font-family:var(--font-mono);font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-.hero h1{font-size:clamp(2.3rem,5.4vw,4rem);letter-spacing:-.01em;margin-top:18px}
-.hero .lead{margin-top:22px;font-size:1.15rem;color:var(--muted);max-width:46ch}
-.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:32px}
-.btn{display:inline-flex;align-items:center;gap:10px;padding:12px 20px;border-radius:6px;font-weight:600;font-size:15px;text-decoration:none;border:1px solid var(--ink)}
-.btn.primary{background:var(--ink);color:var(--ground)}
-.btn.ghost{color:var(--ink)}
-.btn small{font-family:var(--font-mono);font-weight:400;font-size:12px;opacity:.7}
-.mark{width:100%;max-width:380px;justify-self:center;color:var(--ink)}
-.mark .axis{stroke:var(--muted);stroke-dasharray:3 7}
-.mark .dot{fill:var(--muted)}
-
-/* секции */
-section{padding-block:56px;border-top:1px solid var(--line)}
-.sec-head{display:flex;flex-direction:column;gap:10px;margin-bottom:28px;max-width:var(--measure)}
-.sec-head h2{font-size:clamp(1.5rem,3vw,2rem)}
-.sec-head p{color:var(--muted)}
-
-/* таблица сравнения */
-.table-box{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
-table{border-collapse:collapse;width:100%;min-width:560px;font-size:15.5px}
-th,td{text-align:left;padding:13px 18px;border-bottom:1px solid var(--line);vertical-align:top}
-tr:last-child td{border-bottom:0}
-thead th{font-family:var(--font-mono);font-weight:500;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-td:first-child{color:var(--muted);width:24%}
-td.same{color:var(--muted)}
-.note{margin-top:18px;max-width:var(--measure);color:var(--muted);font-size:15.5px}
-
-/* терминал */
-.split{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start}
-.term{background:var(--term);color:var(--term-ink);border-radius:8px;padding:20px 22px;font-family:var(--font-mono);font-size:14px;line-height:1.75;overflow-x:auto;white-space:pre;margin:0}
-.term .p{color:var(--term-dim);user-select:none}
-.term .c{color:var(--term-dim)}
-dl.cmds{margin:0;display:grid;grid-template-columns:max-content 1fr;gap:12px 22px}
-dl.cmds dt{font-family:var(--font-mono);font-size:14.5px}
-dl.cmds dd{margin:0;color:var(--muted);font-size:15.5px}
-
-/* выбор в установщике */
-.choices{display:grid;grid-template-columns:repeat(4,1fr);gap:28px}
-.choice h3{font-family:var(--font-mono);font-weight:500;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
-.choice ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
-.choice li{display:flex;justify-content:space-between;gap:8px;padding-block:6px;border-bottom:1px dashed var(--line)}
-.choice li span{color:var(--muted);font-size:13.5px}
-
-/* тесты */
-.tests{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none}
-.tests li{font-family:var(--font-mono);font-size:13.5px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
-
-footer{border-top:1px solid var(--line);padding-block:28px 40px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:14px}
-
-@media (max-width:860px){
-  .hero{grid-template-columns:1fr;padding-block:48px}
-  .mark{max-width:240px;justify-self:start;order:-1}
-  .split{grid-template-columns:1fr}
-  .choices{grid-template-columns:1fr 1fr}
-}
-@media (max-width:480px){
-  .choices{grid-template-columns:1fr}
-  dl.cmds{grid-template-columns:1fr;gap:2px}
-  dl.cmds dd{margin-bottom:10px}
-  nav ul{gap:14px}
-}
-@media (prefers-reduced-motion:no-preference){
-  .mark .spin{transform-origin:200px 200px;animation:turn 90s linear infinite}
-  @keyframes turn{to{transform:rotate(360deg)}}
-}
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <defs>
-    <symbol id="logo" viewBox="0 0 400 400">
-      <polygon points="200,58 323,129 323,271 200,342 77,271 77,129" fill="none" stroke="currentColor" stroke-width="14" stroke-linejoin="round"/>
-      <path d="M200 200 L148 130 M200 200 L252 130 M200 200 L200 104" fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="round"/>
-      <path d="M200 200 L148 270 M200 200 L252 270 M200 200 L200 296" fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="round"/>
-      <path d="M44 150 L28 150 L28 250 L44 250 M356 150 L372 150 L372 250 L356 250" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-    </symbol>
-  </defs>
-</svg>
-
 <div class="wrap">
   <header class="top">
-    <a class="brand" href="#top"><svg aria-hidden="true"><use href="#logo"/></svg>NixithOS</a>
-    <nav aria-label="Разделы">
+    <a class="brand" href="#top"><img src="img/mark.png" alt="">NixithOS</a>
+    <nav aria-label="Sections">
       <ul>
-        <li><a href="#diff">Отличия</a></li>
+        <li><a href="#diff">Differences</a></li>
         <li><a href="#nixith">nixith</a></li>
-        <li><a href="#install">Установка</a></li>
-        <li><a href="#tests">Тесты</a></li>
+        <li><a href="#install">Installer</a></li>
+        <li><a href="#download">Download</a></li>
         <li><a href="https://github.com/YoungEscapist/nixithos">GitHub</a></li>
+        <li><a class="lang" href="ru/" hreflang="ru" lang="ru">RU</a></li>
       </ul>
     </nav>
   </header>
@@ -181,50 +33,42 @@ footer{border-top:1px solid var(--line);padding-block:28px 40px;display:flex;jus
     <div class="hero">
       <div>
         <p class="eyebrow">nixpkgs 26.05 · s6 + s6-rc · x86_64</p>
-        <h1>NixOS без&nbsp;systemd</h1>
-        <p class="lead">Те же пакеты nixpkgs и та же декларативная конфигурация. Систему запускает и держит s6-rc, а всё остальное остаётся как в NixOS.</p>
+        <h1>NixOS without&nbsp;systemd</h1>
+        <p class="lead">The same nixpkgs packages and the same declarative configuration. s6-rc starts and supervises the system; everything else stays as it is in NixOS.</p>
         <div class="actions">
-          <a class="btn primary" href="https://github.com/YoungEscapist/nixithos/releases/latest">Скачать ISO <small>x86_64</small></a>
-          <a class="btn ghost" href="https://github.com/YoungEscapist/nixithos">Исходники</a>
+          <a class="btn primary" href="#download">Download ISO <small>x86_64</small></a>
+          <a class="btn ghost" href="https://github.com/YoungEscapist/nixithos">Source</a>
         </div>
       </div>
-      <svg class="mark" viewBox="0 0 400 400" role="img" aria-label="Знак NixithOS">
-        <g class="spin">
-          <line class="axis" x1="0" y1="200" x2="400" y2="200" stroke-width="2"/>
-          <line class="axis" x1="200" y1="0" x2="200" y2="400" stroke-width="2"/>
-          <circle class="dot" cx="10" cy="200" r="5"/><circle class="dot" cx="390" cy="200" r="5"/>
-          <circle class="dot" cx="200" cy="10" r="5"/><circle class="dot" cx="200" cy="390" r="5"/>
-        </g>
-        <use href="#logo"/>
-      </svg>
+      <img class="mark" src="img/mark.png" width="640" height="640" alt="The NixithOS mark: a hexagon between two forks, brackets on both sides, dashed axes">
     </div>
 
     <section id="diff">
       <div class="sec-head">
-        <h2>Что изменилось</h2>
-        <p>Меняется только init и то, что с ним связано. Новых возможностей поверх NixOS нет, пакеты не пересобраны и берутся из кэша nixpkgs.</p>
+        <h2>What changes</h2>
+        <p>Only the init system and what is tied to it. Nothing is added on top of NixOS, and packages are not rebuilt: they come from the nixpkgs binary cache.</p>
       </div>
       <div class="table-box">
         <table>
           <thead><tr><th scope="col"></th><th scope="col">NixOS</th><th scope="col">NixithOS</th></tr></thead>
           <tbody>
             <tr><td>PID 1</td><td>systemd</td><td>s6-svscan</td></tr>
-            <tr><td>Службы</td><td>systemd-юниты</td><td>сервисы s6-rc; юниты модулей nixpkgs переводит <code>unitc</code></td></tr>
-            <tr><td>Сеансы</td><td>systemd-logind</td><td>elogind</td></tr>
-            <tr><td>Пересборка</td><td><code>nixos-rebuild switch</code></td><td><code>nixith switch</code>, можно частично через <code>--only</code></td></tr>
-            <tr><td>Загрузчик</td><td>systemd-boot, GRUB</td><td>systemd-boot, GRUB, rEFInd, Limine</td></tr>
-            <tr><td>Пакеты</td><td class="same">nixpkgs</td><td class="same">nixpkgs, без изменений</td></tr>
-            <tr><td>configuration.nix</td><td class="same">модули NixOS</td><td class="same">те же модули</td></tr>
+            <tr><td>Services</td><td>systemd units</td><td>s6-rc services; <code>unitc</code> translates the units of nixpkgs modules</td></tr>
+            <tr><td>Sessions</td><td>systemd-logind</td><td>elogind</td></tr>
+            <tr><td>Rebuilding</td><td><code>nixos-rebuild switch</code></td><td><code>nixith switch</code>, or part of it with <code>--only</code></td></tr>
+            <tr><td>Boot loader</td><td>systemd-boot, GRUB</td><td>systemd-boot, GRUB, rEFInd, Limine</td></tr>
+            <tr><td>Packages</td><td class="same">nixpkgs</td><td class="same">nixpkgs, unchanged</td></tr>
+            <tr><td>configuration.nix</td><td class="same">NixOS modules</td><td class="same">the same modules</td></tr>
           </tbody>
         </table>
       </div>
-      <p class="note">Модули nixpkgs по-прежнему описывают службы как <code>systemd.services.*</code>. NixithOS собирает из этих описаний дерево s6-rc, поэтому <code>services.openssh.enable = true</code> работает без правок.</p>
+      <p class="note">nixpkgs modules still describe services as <code>systemd.services.*</code>. NixithOS builds an s6-rc tree out of those descriptions, so <code>services.openssh.enable = true</code> works as is.</p>
     </section>
 
     <section id="nixith">
       <div class="sec-head">
-        <h2>Команда nixith</h2>
-        <p>Замена nixos-rebuild. Применяет конфигурацию целиком или одну её ветку.</p>
+        <h2>The nixith command</h2>
+        <p>It takes the place of nixos-rebuild. It applies the whole configuration or a single branch of it.</p>
       </div>
       <div class="split">
 <pre class="term"><span class="p">$ </span>sudo nixith switch --only services.openssh
@@ -234,29 +78,59 @@ footer{border-top:1px solid var(--line);padding-block:28px 40px;display:flex;jus
 <span class="c">part 1:  services.openssh</span>
 <span class="c">         from /etc/nixith/configuration.nix</span></pre>
         <dl class="cmds">
-          <dt>switch</dt><dd>собрать и сразу применить</dd>
-          <dt>boot</dt><dd>применить при следующей загрузке</dd>
-          <dt>test</dt><dd>применить без записи в загрузчик</dd>
-          <dt>build</dt><dd>только собрать</dd>
-          <dt>--only PATH</dt><dd>пересобрать одну часть конфига</dd>
-          <dt>parts</dt><dd>из чего собрана текущая система</dd>
-          <dt>generations</dt><dd>список поколений</dd>
-          <dt>install</dt><dd>поставить систему на диск</dd>
-          <dt>generate-config</dt><dd>описать железо в hardware-configuration.nix</dd>
+          <dt>switch</dt><dd>build it and switch to it now</dd>
+          <dt>boot</dt><dd>use it from the next boot</dd>
+          <dt>test</dt><dd>switch to it without a boot entry</dd>
+          <dt>build</dt><dd>only build it</dd>
+          <dt>--only PATH</dt><dd>rebuild one part of the configuration</dd>
+          <dt>parts</dt><dd>what the running system was built from</dd>
+          <dt>generations</dt><dd>list the generations</dd>
+          <dt>install</dt><dd>install the system on a disk</dd>
+          <dt>generate-config</dt><dd>describe the hardware in hardware-configuration.nix</dd>
         </dl>
       </div>
     </section>
 
     <section id="install">
       <div class="sec-head">
-        <h2>Установка</h2>
-        <p>Живой образ загружается в LXQt на labwc и сам открывает Calamares. Что будет стоять в системе, выбирается в установщике.</p>
+        <h2>The installer</h2>
+        <p>The live image boots into LXQt on labwc and opens Calamares by itself. What the installed system will have is chosen there.</p>
+      </div>
+      <div class="shots">
+        <figure class="wide">
+          <a href="img/installer-desktop.webp"><img src="img/installer-desktop.webp" width="1026" height="597" alt="The installer's Desktop page, with Parallax selected and its screenshot"></a>
+          <figcaption><b>Desktop.</b> Parallax, GNOME, KDE Plasma, Hyprland, niri, dwl, or none. Each one is a single line in the configuration.</figcaption>
+        </figure>
+        <figure>
+          <a href="img/installer-welcome.webp"><img src="img/installer-welcome.webp" width="1026" height="597" loading="lazy" alt="The installer's welcome page with the NixithOS mark"></a>
+          <figcaption><b>Welcome.</b> The language comes first; the list on the left shows every step.</figcaption>
+        </figure>
+        <figure>
+          <a href="img/installer-users.webp"><img src="img/installer-users.webp" width="1026" height="597" loading="lazy" alt="The Users page filled in for a demo user"></a>
+          <figcaption><b>Users.</b> Your account, and the same password for root if you want it.</figcaption>
+        </figure>
+        <figure>
+          <a href="img/installer-login.webp"><img src="img/installer-login.webp" width="1026" height="597" loading="lazy" alt="The Login page, with ly selected"></a>
+          <figcaption><b>Login.</b> ly, greetd with tuigreet, or the plain console. GDM and SDDM are left out because they need systemd.</figcaption>
+        </figure>
+        <figure>
+          <a href="img/installer-shell.webp"><img src="img/installer-shell.webp" width="1026" height="597" loading="lazy" alt="The Shell page, with Bash selected"></a>
+          <figcaption><b>Shell.</b> Bash, Zsh, fish or Nushell for your user.</figcaption>
+        </figure>
+        <figure>
+          <a href="img/installer-bootloader.webp"><img src="img/installer-bootloader.webp" width="1026" height="597" loading="lazy" alt="The Bootloader page, with systemd-boot selected"></a>
+          <figcaption><b>Boot loader.</b> systemd-boot, Limine, GRUB or rEFInd. BIOS machines always get GRUB.</figcaption>
+        </figure>
+        <figure>
+          <a href="img/installer-partitions.webp"><img src="img/installer-partitions.webp" width="1026" height="597" loading="lazy" alt="The Partitions page with an empty 30 GiB disk"></a>
+          <figcaption><b>Partitions.</b> Erase a disk, or partition it by hand.</figcaption>
+        </figure>
       </div>
       <div class="choices">
         <div class="choice">
-          <h3>Рабочий стол</h3>
+          <h3>Desktop</h3>
           <ul>
-            <li>Parallax <span>свой</span></li>
+            <li>Parallax <span>ours</span></li>
             <li>GNOME <span>50</span></li>
             <li>KDE Plasma</li>
             <li>Hyprland</li>
@@ -265,36 +139,55 @@ footer{border-top:1px solid var(--line);padding-block:28px 40px;display:flex;jus
           </ul>
         </div>
         <div class="choice">
-          <h3>Вход</h3>
+          <h3>Login</h3>
           <ul>
             <li>ly</li>
             <li>greetd <span>tuigreet</span></li>
-            <li>без менеджера</li>
+            <li>console</li>
           </ul>
         </div>
         <div class="choice">
-          <h3>Оболочка</h3>
+          <h3>Shell</h3>
           <ul>
-            <li>bash</li>
-            <li>zsh</li>
+            <li>Bash</li>
+            <li>Zsh</li>
+            <li>fish</li>
+            <li>Nushell</li>
           </ul>
         </div>
         <div class="choice">
-          <h3>Загрузчик</h3>
+          <h3>Boot loader</h3>
           <ul>
             <li>systemd-boot <span>UEFI</span></li>
+            <li>Limine <span>UEFI</span></li>
             <li>GRUB <span>BIOS / UEFI</span></li>
             <li>rEFInd <span>UEFI</span></li>
-            <li>Limine <span>UEFI</span></li>
           </ul>
         </div>
       </div>
     </section>
 
+    <section id="download">
+      <div class="sec-head">
+        <h2>Download</h2>
+        <p>The graphical ISO is 2.8 GB, more than GitHub allows for one release file.</p>
+      </div>
+      <div class="download">
+        <div>
+          <p>A download link is coming soon.</p>
+          <p class="muted">Until then the image builds from the source with one command. Most of it comes from the nixpkgs binary cache.</p>
+        </div>
+<pre class="term"><span class="p">$ </span>git clone https://github.com/YoungEscapist/nixithos
+<span class="p">$ </span>cd nixithos
+<span class="p">$ </span>nix-build -A isoGraphical
+<span class="c">result/iso/nixithos-graphical-…-x86_64-linux.iso</span></pre>
+      </div>
+    </section>
+
     <section id="tests">
       <div class="sec-head">
-        <h2>Тесты</h2>
-        <p>Каждая часть init проверяется в виртуальной машине, так же как в NixOS.</p>
+        <h2>Tests</h2>
+        <p>Every part of the init system is checked in a virtual machine, the way NixOS does it.</p>
       </div>
       <ul class="tests">
         <li>boot</li><li>units</li><li>switch</li><li>login</li><li>replace</li><li>elogind</li>
@@ -304,7 +197,7 @@ footer{border-top:1px solid var(--line);padding-block:28px 40px;display:flex;jus
   </main>
 
   <footer>
-    <span>NixithOS основана на NixOS и nixpkgs и не связана с проектом NixOS.</span>
+    <span>NixithOS is based on NixOS and nixpkgs and is not affiliated with the NixOS project.</span>
     <span>MIT · <a href="https://github.com/YoungEscapist/nixithos">YoungEscapist/nixithos</a></span>
   </footer>
 </div>

@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NixithOS</title>
+<meta name="description" content="NixithOS: NixOS без systemd, на s6-rc. Те же пакеты nixpkgs и та же конфигурация.">
+<link rel="icon" type="image/png" href="../favicon.png">
+<link rel="alternate" hreflang="en" href="https://youngescapist.github.io/nixithos/">
+<link rel="alternate" hreflang="ru" href="https://youngescapist.github.io/nixithos/ru/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="#top"><img src="../img/mark.png" alt="">NixithOS</a>
+    <nav aria-label="Разделы">
+      <ul>
+        <li><a href="#diff">Отличия</a></li>
+        <li><a href="#nixith">nixith</a></li>
+        <li><a href="#install">Установщик</a></li>
+        <li><a href="#download">Скачать</a></li>
+        <li><a href="https://github.com/YoungEscapist/nixithos">GitHub</a></li>
+        <li><a class="lang" href="../" hreflang="en" lang="en">EN</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="top">
+    <div class="hero">
+      <div>
+        <p class="eyebrow">nixpkgs 26.05 · s6 + s6-rc · x86_64</p>
+        <h1>NixOS без&nbsp;systemd</h1>
+        <p class="lead">Те же пакеты nixpkgs и та же декларативная конфигурация. Систему запускает и держит s6-rc, а всё остальное остаётся как в NixOS.</p>
+        <div class="actions">
+          <a class="btn primary" href="#download">Скачать ISO <small>x86_64</small></a>
+          <a class="btn ghost" href="https://github.com/YoungEscapist/nixithos">Исходники</a>
+        </div>
+      </div>
+      <img class="mark" src="../img/mark.png" width="640" height="640" alt="Знак NixithOS: шестиугольник между двумя развилками, скобки по бокам, пунктирные оси">
+    </div>
+
+    <section id="diff">
+      <div class="sec-head">
+        <h2>Что изменилось</h2>
+        <p>Меняется только init и то, что с ним связано. Новых возможностей поверх NixOS нет, пакеты не пересобраны и берутся из кэша nixpkgs.</p>
+      </div>
+      <div class="table-box">
+        <table>
+          <thead><tr><th scope="col"></th><th scope="col">NixOS</th><th scope="col">NixithOS</th></tr></thead>
+          <tbody>
+            <tr><td>PID 1</td><td>systemd</td><td>s6-svscan</td></tr>
+            <tr><td>Службы</td><td>systemd-юниты</td><td>сервисы s6-rc; юниты модулей nixpkgs переводит <code>unitc</code></td></tr>
+            <tr><td>Сеансы</td><td>systemd-logind</td><td>elogind</td></tr>
+            <tr><td>Пересборка</td><td><code>nixos-rebuild switch</code></td><td><code>nixith switch</code>, можно частично через <code>--only</code></td></tr>
+            <tr><td>Загрузчик</td><td>systemd-boot, GRUB</td><td>systemd-boot, GRUB, rEFInd, Limine</td></tr>
+            <tr><td>Пакеты</td><td class="same">nixpkgs</td><td class="same">nixpkgs, без изменений</td></tr>
+            <tr><td>configuration.nix</td><td class="same">модули NixOS</td><td class="same">те же модули</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Модули nixpkgs по-прежнему описывают службы как <code>systemd.services.*</code>. NixithOS собирает из этих описаний дерево s6-rc, поэтому <code>services.openssh.enable = true</code> работает без правок.</p>
+    </section>
+
+    <section id="nixith">
+      <div class="sec-head">
+        <h2>Команда nixith</h2>
+        <p>Замена nixos-rebuild. Применяет конфигурацию целиком или одну её ветку.</p>
+      </div>
+      <div class="split">
+<pre class="term"><span class="p">$ </span>sudo nixith switch --only services.openssh
+<span class="p">$ </span>nixith parts
+<span class="c">system:  /nix/store/…-nixith-system-nixith-26.05</span>
+<span class="c">base:    /etc/nixith/configuration.nix</span>
+<span class="c">part 1:  services.openssh</span>
+<span class="c">         from /etc/nixith/configuration.nix</span></pre>
+        <dl class="cmds">
+          <dt>switch</dt><dd>собрать и сразу применить</dd>
+          <dt>boot</dt><dd>применить при следующей загрузке</dd>
+          <dt>test</dt><dd>применить без записи в загрузчик</dd>
+          <dt>build</dt><dd>только собрать</dd>
+          <dt>--only PATH</dt><dd>пересобрать одну часть конфига</dd>
+          <dt>parts</dt><dd>из чего собрана текущая система</dd>
+          <dt>generations</dt><dd>список поколений</dd>
+          <dt>install</dt><dd>поставить систему на диск</dd>
+          <dt>generate-config</dt><dd>описать железо в hardware-configuration.nix</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section id="install">
+      <div class="sec-head">
+        <h2>Установщик</h2>
+        <p>Живой образ загружается в LXQt на labwc и сам открывает Calamares. Что будет стоять в системе, выбирается там.</p>
+      </div>
+      <div class="shots">
+        <figure class="wide">
+          <a href="../img/installer-desktop.webp"><img src="../img/installer-desktop.webp" width="1026" height="597" alt="Страница выбора рабочего стола, выбран Parallax и показан его снимок"></a>
+          <figcaption><b>Рабочий стол.</b> Parallax, GNOME, KDE Plasma, Hyprland, niri, dwl или без стола. Каждый включается одной строкой конфига.</figcaption>
+        </figure>
+        <figure>
+          <a href="../img/installer-welcome.webp"><img src="../img/installer-welcome.webp" width="1026" height="597" loading="lazy" alt="Приветствие установщика со знаком NixithOS"></a>
+          <figcaption><b>Приветствие.</b> Сначала язык; слева список всех шагов.</figcaption>
+        </figure>
+        <figure>
+          <a href="../img/installer-users.webp"><img src="../img/installer-users.webp" width="1026" height="597" loading="lazy" alt="Страница пользователей, заполненная для демонстрационного пользователя"></a>
+          <figcaption><b>Пользователи.</b> Твоя учётная запись и, по желанию, тот же пароль для root.</figcaption>
+        </figure>
+        <figure>
+          <a href="../img/installer-login.webp"><img src="../img/installer-login.webp" width="1026" height="597" loading="lazy" alt="Страница выбора менеджера входа, выбран ly"></a>
+          <figcaption><b>Вход.</b> ly, greetd с tuigreet или обычная консоль. GDM и SDDM не предлагаются: им нужен systemd.</figcaption>
+        </figure>
+        <figure>
+          <a href="../img/installer-shell.webp"><img src="../img/installer-shell.webp" width="1026" height="597" loading="lazy" alt="Страница выбора оболочки, выбран Bash"></a>
+          <figcaption><b>Оболочка.</b> Bash, Zsh, fish или Nushell для твоего пользователя.</figcaption>
+        </figure>
+        <figure>
+          <a href="../img/installer-bootloader.webp"><img src="../img/installer-bootloader.webp" width="1026" height="597" loading="lazy" alt="Страница выбора загрузчика, выбран systemd-boot"></a>
+          <figcaption><b>Загрузчик.</b> systemd-boot, Limine, GRUB или rEFInd. На BIOS всегда ставится GRUB.</figcaption>
+        </figure>
+        <figure>
+          <a href="../img/installer-partitions.webp"><img src="../img/installer-partitions.webp" width="1026" height="597" loading="lazy" alt="Страница разметки с пустым диском на 30 ГиБ"></a>
+          <figcaption><b>Разметка.</b> Стереть диск целиком или разметить вручную.</figcaption>
+        </figure>
+      </div>
+      <div class="choices">
+        <div class="choice">
+          <h3>Рабочий стол</h3>
+          <ul>
+            <li>Parallax <span>свой</span></li>
+            <li>GNOME <span>50</span></li>
+            <li>KDE Plasma</li>
+            <li>Hyprland</li>
+            <li>niri</li>
+            <li>dwl</li>
+          </ul>
+        </div>
+        <div class="choice">
+          <h3>Вход</h3>
+          <ul>
+            <li>ly</li>
+            <li>greetd <span>tuigreet</span></li>
+            <li>консоль</li>
+          </ul>
+        </div>
+        <div class="choice">
+          <h3>Оболочка</h3>
+          <ul>
+            <li>Bash</li>
+            <li>Zsh</li>
+            <li>fish</li>
+            <li>Nushell</li>
+          </ul>
+        </div>
+        <div class="choice">
+          <h3>Загрузчик</h3>
+          <ul>
+            <li>systemd-boot <span>UEFI</span></li>
+            <li>Limine <span>UEFI</span></li>
+            <li>GRUB <span>BIOS / UEFI</span></li>
+            <li>rEFInd <span>UEFI</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="download">
+      <div class="sec-head">
+        <h2>Скачать</h2>
+        <p>Графический ISO весит 2,8 ГБ, это больше, чем GitHub принимает в один файл релиза.</p>
+      </div>
+      <div class="download">
+        <div>
+          <p>Ссылка на скачивание скоро появится.</p>
+          <p class="muted">Пока образ можно собрать из исходников одной командой. Почти всё скачается из кэша nixpkgs.</p>
+        </div>
+<pre class="term"><span class="p">$ </span>git clone https://github.com/YoungEscapist/nixithos
+<span class="p">$ </span>cd nixithos
+<span class="p">$ </span>nix-build -A isoGraphical
+<span class="c">result/iso/nixithos-graphical-…-x86_64-linux.iso</span></pre>
+      </div>
+    </section>
+
+    <section id="tests">
+      <div class="sec-head">
+        <h2>Тесты</h2>
+        <p>Каждая часть init проверяется в виртуальной машине, так же как в NixOS.</p>
+      </div>
+      <ul class="tests">
+        <li>boot</li><li>units</li><li>switch</li><li>login</li><li>replace</li><li>elogind</li>
+        <li>user-services</li><li>bootloader</li><li>sandbox</li><li>timesync</li><li>module</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <span>NixithOS основана на NixOS и nixpkgs и не связана с проектом NixOS.</span>
+    <span>MIT · <a href="https://github.com/YoungEscapist/nixithos">YoungEscapist/nixithos</a></span>
+  </footer>
+</div>
+</body>
+</html>
