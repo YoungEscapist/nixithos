@@ -55,6 +55,17 @@ let
 
   parallax = pkgs.callPackage ../../pkgs/parallax { autostart = lib.getExe parallaxAutostart; };
 
+  # Its ScreenCast backend lives inside the compositor (src/portal.rs). The
+  # compositor writes this file into ~/.local/share itself, but the portal of
+  # nixpkgs reads backends only from NIX_XDG_DESKTOP_PORTAL_DIR, and without
+  # it ScreenCast is not on the bus at all (black screen in Vesktop and OBS).
+  parallaxPortal = pkgs.writeTextDir "share/xdg-desktop-portal/portals/parallax.portal" ''
+    [portal]
+    DBusName=org.freedesktop.impl.portal.desktop.parallax
+    Interfaces=org.freedesktop.impl.portal.ScreenCast;
+    UseIn=parallax;
+  '';
+
   # Parallax's launcher (Super+S in its configuration): rofi with the
   # applications, a second press closing it
   plx-launcher = pkgs.writeShellScriptBin "plx-launcher" ''
@@ -225,8 +236,14 @@ in
       programs.xwayland.enable = true;
       xdg.portal = {
         enable = true;
-        extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
-        config.parallax.default = [ "gtk" ];
+        extraPortals = [
+          pkgs.xdg-desktop-portal-gtk
+          parallaxPortal
+        ];
+        config.parallax = {
+          default = [ "gtk" ];
+          "org.freedesktop.impl.portal.ScreenCast" = [ "parallax" ];
+        };
       };
       # its Bluetooth menu (Super+Shift+B) talks to bluetoothd over the
       # system bus; Experimental for BatteryProviderManager1, through which
