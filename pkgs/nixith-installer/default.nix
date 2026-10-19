@@ -8,8 +8,10 @@
   stdenv,
   makeWrapper,
   pkg-config,
+  imagemagick,
   ncurses,
   libxcrypt,
+  stb,
   bash,
   coreutils,
   util-linux,
@@ -36,17 +38,21 @@ stdenv.mkDerivation {
   nativeBuildInputs = [
     makeWrapper
     pkg-config
+    imagemagick
   ];
   buildInputs = [
     ncurses
     libxcrypt
+    stb
   ];
 
   buildPhase = ''
     runHook preBuild
     $CC -O2 -Wall -Wno-missing-field-initializers -Wno-format-truncation -Wno-stringop-truncation \
       -DINSTALL_SH=\"$out/libexec/nixith-installer/install.sh\" \
-      -o nixith-installer installer.c $(pkg-config --cflags --libs ncursesw) -lcrypt
+      -DSHOTS=\"$out/share/nixith-installer/screenshots\" \
+      -I${stb}/include/stb \
+      -o nixith-installer installer.c $(pkg-config --cflags --libs ncursesw) -lcrypt -lm
     runHook postBuild
   '';
 
@@ -54,6 +60,13 @@ stdenv.mkDerivation {
     runHook preInstall
     install -Dm755 nixith-installer $out/bin/nixith-installer
     install -Dm755 install.sh $out/libexec/nixith-installer/install.sh
+    # the screenshots Calamares showed (each desktop, login screen, shell and
+    # boot loader, taken in QEMU): on black at 16:10, as it had them
+    mkdir -p $out/share/nixith-installer/screenshots
+    for shot in ${../../branding/screenshots}/*.png; do
+      magick $shot -resize 1024x640 -background black -gravity center -extent 1024x640 \
+        -quality 90 $out/share/nixith-installer/screenshots/$(basename $shot .png).jpg
+    done
     patchShebangs $out/libexec
     # the tools of the installation first, then the system's (nmcli, nixith,
     # udevadm, reboot)

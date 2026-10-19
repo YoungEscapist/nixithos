@@ -33,6 +33,7 @@ set -euo pipefail
 : "${NI_SHELL:=bash}"        # bash zsh fish nushell
 : "${NI_LOADER:=systemd-boot}"  # systemd-boot limine grub refind (UEFI)
 : "${NI_UNFREE:=0}"
+: "${NI_NM_KEEP:=}"          # NetworkManager profiles to keep, a file a line
 : "${NI_DRY:=0}"
 root=/mnt
 
@@ -373,5 +374,16 @@ for attempt in 1 2 3; do
 done
 
 step 5 "Finishing"
+# The connections made in the installer (Wi-Fi with its password, a fixed
+# address, PPPoE): the installed system comes up with them.  Root's only, as
+# NetworkManager keeps them.
+if [ -n "$NI_NM_KEEP" ]; then
+    run install -d -m 0700 "$root/etc/NetworkManager/system-connections"
+    while IFS= read -r f; do
+        if [ -n "$f" ]; then
+            run install -m 0600 "$f" "$root/etc/NetworkManager/system-connections/"
+        fi
+    done <<< "$NI_NM_KEEP"
+fi
 run sync
 echo "::done"

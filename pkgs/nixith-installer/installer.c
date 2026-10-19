@@ -5,9 +5,12 @@
  * zone, language, keyboard, user, desktop, login, shell, boot loader,
  * unfree software, disk), with a network step in front of them that does
  * what nmtui does, only simpler: the wired network by itself, a list of
- * Wi-Fi networks, a password.  Nothing touches the disk until the summary is
- * confirmed; then ./install.sh does the work (partitioning, the
- * configuration, `nixith install`) and its output is shown as it goes.
+ * Wi-Fi networks, and a form for a connection that needs more than a
+ * password (802.1X, a hidden network, PPPoE, an address by hand).  Like
+ * Calamares, it shows a screenshot of each desktop, login screen, shell and
+ * boot loader, and slides while it installs.  Nothing touches the disk until
+ * the summary is confirmed; then ./install.sh does the work (partitioning,
+ * the configuration, `nixith install`) and its output is shown as it goes.
  *
  *   nixith-installer            the installer (as root)
  *   nixith-installer --dry      the same, but install.sh only prints its plan
@@ -21,24 +24,47 @@
 #include <curses.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/fb.h>
+#include <linux/kd.h>
+#include <linux/vt.h>
 #include <locale.h>
+#include <math.h>
+#include <arpa/inet.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 #include <wchar.h>
+
+/* the screenshots are JPEG files (default.nix makes them) */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_PNG
+#include <stb_image.h>
+#pragma GCC diagnostic pop
 
 #ifndef INSTALL_SH
 #define INSTALL_SH "./install.sh"
 #endif
 #ifndef LOGO_TXT
 #define LOGO_TXT "/etc/nixithos/logo.txt"
+#endif
+#ifndef SHOTS
+#define SHOTS "./screenshots"
 #endif
 
 enum { NEXT = 1, STAY = 0, BACK = -1, QUIT = -2 };
@@ -187,7 +213,7 @@ static const char *step_name(int i)
 
 /* --- drawing -------------------------------------------------------------- */
 
-enum { C_NORMAL = 1, C_DIM, C_SEL, C_ERR, C_OK, C_HEAD };
+enum { C_NORMAL = 1, C_DIM, C_SEL, C_ERR, C_OK, C_HEAD, C_PIC };
 static int CY, CX, CW, CH; /* the content area */
 
 /* the display width of a UTF-8 string */
@@ -290,11 +316,386 @@ static int wrapped_lines(int w, const char *text)
     return n;
 }
 
+/* --- pictures --------------------------------------------------------------- */
+
+/*
+ * The screenshots of NixithOS that Calamares showed (../../branding/
+ * screenshots, as JPEG files at 16:10 on black): one for each choice of a
+ * desktop, a login screen, a shell and a boot loader, and some in the slides
+ * while the system installs.
+ *
+ * On the Linux console they are drawn straight onto its framebuffer, as fbi
+ * and w3m do it, over cells the screen keeps for them: spaces in a colour
+ * pair of their own (C_PIC), black on black.  Not blank to ncurses, so it
+ * never clears a line through the picture, and it does not write them again
+ * until the picture goes, when they become blank and that clears it away.
+ * In a terminal with 24-bit colour they are half blocks instead; anywhere
+ * else (a serial console, 256 colours) there are none, and that is all.
+ */
+
+enum { PIC_NONE, PIC_FB, PIC_HALF };
+static int pic_mode;
+
+static struct {
+    int fd, vt, tty;  /* the framebuffer; the console's number, and it open */
+    int relayed;      /* the screen is written through sudo's terminal */
+    unsigned char *mem;
+    size_t len;
+    struct fb_var_screeninfo v;
+    struct fb_fix_screeninfo f;
+} fb = { .fd = -1, .tty = -1 };
+
+/* a picture's place on the screen, in cells */
+struct place {
+    char name[48];
+    int y, x, h, w;
+};
+static struct place want, shown; /* this screen's; the one on the screen */
+static time_t drawn_at;
+
+/* the virtual console of a process's standard input, or 0 */
+static int vt_of(pid_t pid)
+{
+    char path[64];
+    struct stat st;
+    snprintf(path, sizeof path, "/proc/%d/fd/0", (int)pid);
+    if (stat(path, &st) != 0 || !S_ISCHR(st.st_mode) || major(st.st_rdev) != 4 ||
+        minor(st.st_rdev) < 1 || minor(st.st_rdev) > 63)
+        return 0;
+    return minor(st.st_rdev);
+}
+
+/* the console this runs on: its own terminal, or, as sudo runs a command on
+ * a pseudo-terminal of its own (use_pty) and passes the screen on, the one
+ * of sudo above it */
+static int find_vt(void)
+{
+    pid_t pid = getpid();
+    for (int depth = 0; depth < 4; depth++) {
+        int vt = vt_of(pid);
+        if (vt)
+            return vt;
+        char path[64], stat_[512], comm[64] = "";
+        snprintf(path, sizeof path, "/proc/%d/stat", (int)pid);
+        FILE *f = fopen(path, "r");
+        if (!f)
+            return 0;
+        size_t n = fread(stat_, 1, sizeof stat_ - 1, f);
+        fclose(f);
+        stat_[n] = 0;
+        char *close_ = strrchr(stat_, ')'); /* "pid (comm) state ppid ..." */
+        int ppid = 0;
+        if (!close_ || sscanf(close_ + 2, "%*c %d", &ppid) != 1 || ppid <= 1)
+            return 0;
+        snprintf(path, sizeof path, "/proc/%d/comm", ppid);
+        if ((f = fopen(path, "r"))) {
+            if (!fgets(comm, sizeof comm, f))
+                comm[0] = 0;
+            fclose(f);
+        }
+        if (strcmp(comm, "sudo\n"))
+            return 0;
+        pid = ppid;
+        fb.relayed = 1;
+    }
+    return 0;
+}
+
+static void pic_init(void)
+{
+    if (getenv("NIXITH_NO_PICTURES"))
+        return;
+    char tty[32];
+    if ((fb.vt = find_vt())) {
+        /* a virtual console: its framebuffer, if it is one to draw on */
+        snprintf(tty, sizeof tty, "/dev/tty%d", fb.vt);
+        fb.tty = open(tty, O_RDONLY | O_NOCTTY | O_CLOEXEC);
+        fb.fd = open("/dev/fb0", O_RDWR | O_CLOEXEC);
+        if (fb.fd < 0 || fb.tty < 0)
+            return;
+        if (ioctl(fb.fd, FBIOGET_VSCREENINFO, &fb.v) == 0 && ioctl(fb.fd, FBIOGET_FSCREENINFO, &fb.f) == 0 &&
+            fb.f.type == FB_TYPE_PACKED_PIXELS && fb.f.visual == FB_VISUAL_TRUECOLOR &&
+            (fb.v.bits_per_pixel == 16 || fb.v.bits_per_pixel == 24 || fb.v.bits_per_pixel == 32) &&
+            fb.v.red.length <= 8 && fb.v.green.length <= 8 && fb.v.blue.length <= 8 && fb.v.transp.length <= 8) {
+            fb.len = fb.f.smem_len;
+            fb.mem = mmap(NULL, fb.len, PROT_READ | PROT_WRITE, MAP_SHARED, fb.fd, 0);
+            if (fb.mem != MAP_FAILED) {
+                pic_mode = PIC_FB;
+                return;
+            }
+            fb.mem = NULL;
+        }
+        close(fb.fd);
+        fb.fd = -1;
+        return;
+    }
+    const char *ct = getenv("COLORTERM");
+    if (utf8 && ct && (strstr(ct, "truecolor") || strstr(ct, "24bit")))
+        pic_mode = PIC_HALF;
+}
+
+/* the size of a cell in the picture's pixels: a half block is two of them,
+ * one above the other */
+static void cell(int *cw, int *ch)
+{
+    if (pic_mode == PIC_FB && COLS > 0 && LINES > 0) {
+        *cw = fb.v.xres / COLS;
+        *ch = fb.v.yres / LINES;
+    } else {
+        *cw = 1;
+        *ch = 2;
+    }
+}
+
+/* src (sw x sh, RGB) at dw x dh: a tent filter as wide as the step, so that
+ * making a picture smaller averages its pixels and making it bigger blends
+ * them; first along the rows, then down the columns */
+static unsigned char *resample(const unsigned char *src, int sw, int sh, int dw, int dh)
+{
+    float *mid = malloc(sizeof *mid * dw * sh * 3);
+    unsigned char *out = malloc((size_t)dw * dh * 3);
+    if (!mid || !out) {
+        free(mid);
+        free(out);
+        return NULL;
+    }
+    for (int pass = 0; pass < 2; pass++) {
+        int n_in = pass ? sh : sw, n_out = pass ? dh : dw, lines = pass ? dw : sh;
+        float s = (float)n_in / n_out, r = s > 1 ? s : 1;
+        for (int o = 0; o < n_out; o++) {
+            float c = (o + 0.5f) * s - 0.5f;
+            int lo = (int)ceilf(c - r), hi = (int)floorf(c + r);
+            for (int l = 0; l < lines; l++) {
+                float acc[3] = { 0, 0, 0 }, ws = 0;
+                for (int k = lo; k <= hi; k++) {
+                    float w = 1 - fabsf(k - c) / r;
+                    if (w <= 0)
+                        continue;
+                    int kk = k < 0 ? 0 : k >= n_in ? n_in - 1 : k;
+                    for (int q = 0; q < 3; q++)
+                        acc[q] += w * (pass ? mid[((size_t)kk * dw + l) * 3 + q] : src[((size_t)l * sw + kk) * 3 + q]);
+                    ws += w;
+                }
+                for (int q = 0; q < 3; q++) {
+                    float v = ws > 0 ? acc[q] / ws : 0;
+                    if (pass)
+                        out[((size_t)o * dw + l) * 3 + q] = v <= 0 ? 0 : v >= 255 ? 255 : (unsigned char)(v + 0.5f);
+                    else
+                        mid[((size_t)l * dw + o) * 3 + q] = v;
+                }
+            }
+        }
+    }
+    free(mid);
+    return out;
+}
+
+/* screenshots fitted to a box, kept for when they are shown again */
+struct pix {
+    char name[48];
+    int bw, bh; /* the box */
+    int w, h;
+    unsigned char *rgb;
+};
+static struct pix pixes[16];
+static int npix, pix_next;
+
+static struct pix *pix_get(const char *name, int bw, int bh)
+{
+    for (int i = 0; i < npix; i++)
+        if (pixes[i].bw == bw && pixes[i].bh == bh && !strcmp(pixes[i].name, name))
+            return pixes[i].rgb ? &pixes[i] : NULL;
+    struct pix *p = &pixes[pix_next];
+    pix_next = (pix_next + 1) % 16;
+    if (npix < 16)
+        npix++;
+    free(p->rgb);
+    memset(p, 0, sizeof *p);
+    snprintf(p->name, sizeof p->name, "%s", name);
+    p->bw = bw;
+    p->bh = bh;
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s.jpg", getenv("NIXITH_SHOTS") ? getenv("NIXITH_SHOTS") : SHOTS, name);
+    int sw, sh, n;
+    unsigned char *src = bw > 0 && bh > 0 ? stbi_load(path, &sw, &sh, &n, 3) : NULL;
+    if (!src)
+        return NULL; /* (and is not looked for again) */
+    int w = bw, h = (int)((long)sh * bw / sw);
+    if (h > bh) {
+        h = bh;
+        w = (int)((long)sw * bh / sh);
+    }
+    if (w > 0 && h > 0 && (p->rgb = resample(src, sw, sh, w, h))) {
+        p->w = w;
+        p->h = h;
+    }
+    stbi_image_free(src);
+    return p->rgb ? p : NULL;
+}
+
+/* n pixels of a row of the framebuffer from (x, y): rgb, or all of one colour */
+static void fb_put(int x, int y, int n, const unsigned char *rgb, const unsigned char *one)
+{
+    int bpp = fb.v.bits_per_pixel / 8;
+    if (y < 0 || y >= (int)fb.v.yres || x < 0)
+        return;
+    if (x + n > (int)fb.v.xres)
+        n = fb.v.xres - x;
+    size_t off = (size_t)(y + fb.v.yoffset) * fb.f.line_length + (size_t)(x + fb.v.xoffset) * bpp;
+    if (n <= 0 || off + (size_t)n * bpp > fb.len)
+        return;
+    uint32_t alpha = fb.v.transp.length ? ((1u << fb.v.transp.length) - 1) << fb.v.transp.offset : 0;
+    unsigned char *d = fb.mem + off;
+    for (int i = 0; i < n; i++, d += bpp) {
+        const unsigned char *c = rgb ? rgb + i * 3 : one;
+        uint32_t v = alpha | (uint32_t)(c[0] >> (8 - fb.v.red.length)) << fb.v.red.offset |
+                     (uint32_t)(c[1] >> (8 - fb.v.green.length)) << fb.v.green.offset |
+                     (uint32_t)(c[2] >> (8 - fb.v.blue.length)) << fb.v.blue.offset;
+        if (bpp == 4) {
+            memcpy(d, &v, 4);
+        } else if (bpp == 2) {
+            uint16_t s = v;
+            memcpy(d, &s, 2);
+        } else {
+            d[0] = v;
+            d[1] = v >> 8;
+            d[2] = v >> 16;
+        }
+    }
+}
+
+static void pic_draw(const struct place *p)
+{
+    static const unsigned char black[3] = { 0, 0, 0 }, frame[3] = { 0x2a, 0x2a, 0x2a };
+    if (!p->name[0])
+        return;
+    int cw, ch;
+    cell(&cw, &ch);
+    if (pic_mode == PIC_FB) {
+        struct vt_stat vs;
+        int mode = KD_TEXT;
+        if (ioctl(fb.tty, VT_GETSTATE, &vs) != 0 || vs.v_active != fb.vt)
+            return; /* another console is on the screen */
+        if (ioctl(fb.tty, KDGETMODE, &mode) == 0 && mode != KD_TEXT)
+            return; /* a graphical session has it */
+        int X = p->x * cw, Y = p->y * ch, W = p->w * cw, H = p->h * ch;
+        struct pix *im = pix_get(p->name, W - 2, H - 2);
+        /* the screenshot in a thin frame, at the top of its cells and in the
+         * middle across; the rest of them black (painted around it, not
+         * under it: that would flicker) */
+        int fw = im ? im->w + 2 : 0, fh = im ? im->h + 2 : 0, fx = X + (W - fw) / 2;
+        for (int y = 0; y < H; y++) {
+            if (y >= fh) {
+                fb_put(X, Y + y, W, NULL, black);
+                continue;
+            }
+            fb_put(X, Y + y, fx - X, NULL, black);
+            fb_put(fx + fw, Y + y, X + W - fx - fw, NULL, black);
+            if (y == 0 || y == fh - 1) {
+                fb_put(fx, Y + y, fw, NULL, frame);
+            } else {
+                fb_put(fx, Y + y, 1, NULL, frame);
+                fb_put(fx + 1, Y + y, im->w, im->rgb + (size_t)(y - 1) * im->w * 3, NULL);
+                fb_put(fx + fw - 1, Y + y, 1, NULL, frame);
+            }
+        }
+    } else if (pic_mode == PIC_HALF) {
+        struct pix *im = pix_get(p->name, p->w, p->h * 2);
+        if (!im)
+            return;
+        int x0 = p->x + (p->w - im->w) / 2;
+        printf("\0337");
+        for (int r = 0; r < (im->h + 1) / 2; r++) {
+            printf("\033[%d;%dH", p->y + r + 1, x0 + 1);
+            for (int x = 0; x < im->w; x++) {
+                const unsigned char *t = im->rgb + ((size_t)2 * r * im->w + x) * 3;
+                if (2 * r + 1 < im->h) {
+                    const unsigned char *b = t + (size_t)im->w * 3;
+                    printf("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm▀", t[0], t[1], t[2], b[0], b[1], b[2]);
+                } else {
+                    printf("\033[38;2;%d;%d;%d;49m▀", t[0], t[1], t[2]);
+                }
+            }
+            printf("\033[0m");
+        }
+        printf("\0338");
+        fflush(stdout);
+    }
+    drawn_at = time(NULL);
+}
+
+/* this screen's picture: the screenshot `name` in h rows by w columns from
+ * (y, x); after chrome(), which takes the last screen's away */
+static void pic(const char *name, int y, int x, int h, int w)
+{
+    memset(&want, 0, sizeof want);
+    if (!pic_mode || !name || h < 4 || w < 12)
+        return;
+    snprintf(want.name, sizeof want.name, "%s", name);
+    want.y = y;
+    want.x = x;
+    want.h = h;
+    want.w = w;
+    attron(COLOR_PAIR(C_PIC));
+    for (int r = 0; r < h; r++)
+        mvhline(y + r, x, ' ', w);
+    attroff(COLOR_PAIR(C_PIC));
+}
+
+/* the picture away, its cells blank again: for a dialog over the screen */
+static void pic_hide(void)
+{
+    if (!want.name[0])
+        return;
+    attr_t a;
+    short pair;
+    attr_get(&a, &pair, NULL);
+    attrset(A_NORMAL);
+    for (int r = 0; r < want.h; r++)
+        mvhline(want.y + r, want.x, ' ', want.w);
+    attr_set(a, pair, NULL);
+    memset(&want, 0, sizeof want);
+}
+
+/* the screen as drawn, and then its picture: again only when it is another,
+ * or once a second (the console paints over it when it comes back from
+ * another one) */
+static void present(void)
+{
+    int moved = want.y != shown.y || want.x != shown.x || want.h != shown.h || want.w != shown.w || !shown.name[0];
+    refresh();
+    if (want.name[0] && (moved || strcmp(want.name, shown.name) || time(NULL) != drawn_at)) {
+        if (moved && fb.relayed && pic_mode == PIC_FB) {
+            /* the picture's blank cells were just written, and go through
+             * sudo on their way to the console: the picture after them */
+            tcdrain(1);
+            usleep(50000);
+        }
+        pic_draw(&want);
+    }
+    shown = want;
+}
+
+/* get_wch(), with the picture drawn again every second while it waits */
+static int key(wint_t *c)
+{
+    for (;;) {
+        timeout(pic_mode == PIC_FB && shown.name[0] ? 1000 : -1);
+        int r = get_wch(c);
+        if (r != ERR || !(pic_mode == PIC_FB && shown.name[0])) {
+            timeout(-1);
+            return r;
+        }
+        pic_draw(&shown);
+    }
+}
+
 static int cur_step;
 
 static void chrome(const char *keys)
 {
     erase();
+    memset(&want, 0, sizeof want);
     int sw = 20;
     /* the header */
     attron(COLOR_PAIR(C_HEAD));
@@ -359,9 +760,10 @@ static int too_small(void)
     if (COLS >= 72 && LINES >= 22)
         return 0;
     erase();
+    memset(&want, 0, sizeof want);
     put(0, 0, T("The terminal is too small (72x22 at least).",
                 "Терминал слишком мал (нужно хотя бы 72x22)."), COLS);
-    refresh();
+    present();
     return 1;
 }
 
@@ -373,6 +775,7 @@ static int dialog(const char *head, const char *text, const char *b1, const char
     const char *btn[3] = { b1, b2, b3 };
     int nb = b3 ? 3 : b2 ? 2 : 1, sel = 0;
     for (;;) {
+        pic_hide();
         int w = COLS - 8 < 64 ? COLS - 8 : 64;
         int h = wrapped_lines(w - 4, text) + 6;
         if (h > LINES - 2)
@@ -407,9 +810,9 @@ static int dialog(const char *head, const char *text, const char *b1, const char
                 attroff(COLOR_PAIR(C_SEL));
         }
         attroff(COLOR_PAIR(C_NORMAL));
-        refresh();
+        present();
         wint_t c;
-        int r = get_wch(&c);
+        int r = key(&c);
         if (r == KEY_CODE_YES) {
             if (c == KEY_LEFT || c == KEY_BTAB)
                 sel = (sel + nb - 1) % nb;
@@ -435,6 +838,8 @@ static void msg(const char *head, const char *text)
 
 static void quit_installer(void)
 {
+    pic_hide();
+    present();
     endwin();
     if (!net_only)
         printf("%s\n", T("The installer is closed. `sudo nixith-installer` starts it again.",
@@ -453,98 +858,6 @@ static int ask_quit(void)
     return STAY;
 }
 
-/* a line of text, typed in a box; returns 1 if entered, 0 if cancelled */
-static int ask_line(const char *head, const char *prompt, char *buf, int size, int secret)
-{
-    int show = 0;
-    for (;;) {
-        int w = COLS - 8 < 60 ? COLS - 8 : 60, h = 9;
-        int y0 = (LINES - h) / 2, x0 = (COLS - w) / 2;
-        attron(COLOR_PAIR(C_NORMAL));
-        for (int y = y0; y < y0 + h; y++)
-            mvhline(y, x0, ' ', w);
-        attron(A_BOLD);
-        mvhline(y0, x0, ACS_HLINE, w);
-        mvhline(y0 + h - 1, x0, ACS_HLINE, w);
-        mvvline(y0, x0, ACS_VLINE, h);
-        mvvline(y0, x0 + w - 1, ACS_VLINE, h);
-        mvaddch(y0, x0, ACS_ULCORNER);
-        mvaddch(y0, x0 + w - 1, ACS_URCORNER);
-        mvaddch(y0 + h - 1, x0, ACS_LLCORNER);
-        mvaddch(y0 + h - 1, x0 + w - 1, ACS_LRCORNER);
-        char ht[160];
-        snprintf(ht, sizeof ht, " %s ", head);
-        put(y0, x0 + 2, ht, w - 4);
-        attroff(A_BOLD);
-        put(y0 + 2, x0 + 2, prompt, w - 4);
-        char shown[512];
-        if (secret && !show) {
-            int n = dwidth(buf), k = 0;
-            for (; k < n && k < 500; k++)
-                shown[k] = '*';
-            shown[k] = 0;
-        } else {
-            snprintf(shown, sizeof shown, "%s", buf);
-        }
-        attron(COLOR_PAIR(C_SEL));
-        mvhline(y0 + 4, x0 + 2, ' ', w - 4);
-        int sw = dwidth(shown);
-        const char *vis = shown;
-        while (sw > w - 6 && *vis) { /* keep the end in sight */
-            vis++;
-            sw = dwidth(vis);
-        }
-        put(y0 + 4, x0 + 3, vis, w - 6);
-        attroff(COLOR_PAIR(C_SEL));
-        attron(COLOR_PAIR(C_DIM) | A_BOLD);
-        put(y0 + 6, x0 + 2,
-            secret ? T("Enter: OK   Esc: cancel   F2: show/hide", "Enter: готово   Esc: отмена   F2: показать")
-                   : T("Enter: OK   Esc: cancel", "Enter: готово   Esc: отмена"),
-            w - 4);
-        attroff(COLOR_PAIR(C_DIM) | A_BOLD);
-        attroff(COLOR_PAIR(C_NORMAL));
-        move(y0 + 4, x0 + 3 + dwidth(vis));
-        curs_set(1);
-        refresh();
-        wint_t c;
-        int r = get_wch(&c);
-        curs_set(0);
-        if (r == KEY_CODE_YES) {
-            if (c == KEY_ENTER)
-                return 1;
-            if (c == KEY_F(2))
-                show = !show;
-            if (c == KEY_BACKSPACE) {
-                int n = strlen(buf);
-                while (n > 0 && (buf[n - 1] & 0xC0) == 0x80)
-                    n--;
-                if (n > 0)
-                    buf[n - 1] = 0;
-            }
-        } else if (r == OK) {
-            if (c == '\n' || c == '\r')
-                return 1;
-            if (c == 27)
-                return 0;
-            if (c == 127 || c == 8) {
-                int n = strlen(buf);
-                while (n > 0 && (buf[n - 1] & 0xC0) == 0x80)
-                    n--;
-                if (n > 0)
-                    buf[n - 1] = 0;
-            } else if (c >= 32) {
-                char mb[8];
-                mbstate_t st = { 0 };
-                size_t k = wcrtomb(mb, c, &st);
-                if (k != (size_t)-1 && strlen(buf) + k < (size_t)size) {
-                    mb[k] = 0;
-                    strcat(buf, mb);
-                }
-            }
-        }
-    }
-}
-
 /* --- a list to choose from ------------------------------------------------ */
 
 struct menu {
@@ -556,7 +869,28 @@ struct menu {
     const char *(*desc)(int);
     int search;     /* typing narrows the list */
     const char *keys;
+    const char *(*pic)(int); /* the screenshot of a choice, or NULL */
 };
+
+/* the screenshot `name` on the right of the content area from row y, in
+ * share percent of its width and at most maxh rows; the text keeps the rest
+ * of CW.  Only on a screen wide enough for both. */
+static void pic_right(const char *name, int y, int share, int maxh)
+{
+    if (!pic_mode || !name || CW < 84)
+        return;
+    int cw, ch;
+    cell(&cw, &ch);
+    int pw = CW * share / 100;
+    int ph = ((pw * cw - 2) * 10 / 16 + 2 + ch - 1) / ch; /* 16:10, framed */
+    if (ph > maxh) {
+        ph = maxh;
+        pw = ((ph * ch - 2) * 16 / 10 + 2 + cw - 1) / cw;
+    }
+    pic(name, y, CX + CW - pw, ph, pw);
+    if (want.name[0])
+        CW -= pw + 3;
+}
 
 static int run_menu(struct menu *m, int *sel)
 {
@@ -566,7 +900,7 @@ static int run_menu(struct menu *m, int *sel)
     for (;;) {
         if (too_small()) {
             wint_t c;
-            get_wch(&c);
+            key(&c);
             continue;
         }
         /* what matches the search */
@@ -585,6 +919,8 @@ static int run_menu(struct menu *m, int *sel)
                                        "↑↓ выбор   набор: поиск   Enter: далее   Esc: назад   F10: выход")
                                    : T("↑↓ move   Enter: next   Esc: back   F10: quit",
                                        "↑↓ выбор   Enter: далее   Esc: назад   F10: выход"));
+        if (m->pic && nv)
+            pic_right(m->pic(*sel), CY, 55, CH - 1);
         int y = CY;
         int need = (m->title ? 2 : 0) + (m->intro ? wrapped_lines(CW, m->intro) + 1 : 0) + m->n;
         if (m->art && m->nart + 1 + need <= CH) {
@@ -657,10 +993,10 @@ static int run_menu(struct menu *m, int *sel)
             attroff(COLOR_PAIR(C_DIM) | A_BOLD);
             wrap(CY + CH - descrows + 1, CX, CW, CY + CH, m->desc(*sel));
         }
-        refresh();
+        present();
 
         wint_t c;
-        int r = get_wch(&c);
+        int r = key(&c);
         if (r == KEY_CODE_YES) {
             switch (c) {
             case KEY_UP: if (vsel > 0) *sel = vis[vsel - 1]; break;
@@ -754,12 +1090,14 @@ static void busy(const char *text)
     attron(COLOR_PAIR(C_DIM) | A_BOLD);
     put(y, CX, T("Please wait...", "Подождите..."), CW);
     attroff(COLOR_PAIR(C_DIM) | A_BOLD);
-    refresh();
+    present();
 }
 
 /* the user's shell, then back to the screen */
 static void shell(const char *note)
 {
+    pic_hide();
+    present();
     def_prog_mode();
     endwin();
     printf("\n%s\n%s\n\n", note, T("Type `exit` to return to the installer.",
@@ -768,7 +1106,7 @@ static void shell(const char *note)
     if (system("${SHELL:-bash} -l") == -1)
         perror("bash");
     reset_prog_mode();
-    refresh();
+    present();
 }
 
 /* --- 1. welcome ------------------------------------------------------------- */
@@ -831,7 +1169,7 @@ static int step_guide(void)
             "  Space     tick a box\n"
             "  letters   search in long lists (time zones)\n"
             "  F10       quit\n\n"
-            "Next comes the network: the installation downloads the desktop you choose, so connect to the internet if you can. A cable works by itself; for Wi-Fi pick the network and type its password.\n\n"
+            "Next comes the network: the installation downloads the desktop you choose, so connect to the internet if you can. A cable works by itself; for Wi-Fi pick the network and type its password. A network with a login (802.1X), a hidden one, PPPoE and an address by hand are there too.\n\n"
             "Need a shell? Alt+F2 opens another console.",
             "Установщик задаёт несколько вопросов, по одному на шаг; список слева показывает, где вы сейчас. На диск ничего не пишется до самого последнего шага, после итога.\n\n"
             "Клавиши:\n"
@@ -842,11 +1180,11 @@ static int step_guide(void)
             "  Пробел    поставить галочку\n"
             "  буквы     поиск в длинных списках (часовые пояса)\n"
             "  F10       выход\n\n"
-            "Дальше — сеть: установка скачивает выбранный рабочий стол, поэтому подключитесь к интернету, если можете. Кабель работает сам; для Wi-Fi выберите сеть и введите пароль.\n\n"
+            "Дальше — сеть: установка скачивает выбранный рабочий стол, поэтому подключитесь к интернету, если можете. Кабель работает сам; для Wi-Fi выберите сеть и введите пароль. Там же — сети с логином (802.1X), скрытые сети, PPPoE и адрес вручную.\n\n"
             "Нужна консоль? Alt+F2 открывает ещё одну."));
-        refresh();
+        present();
         wint_t c;
-        int r = get_wch(&c);
+        int r = key(&c);
         if (r == OK && (c == '\n' || c == '\r'))
             return NEXT;
         if (r == KEY_CODE_YES && c == KEY_ENTER)
@@ -858,6 +1196,200 @@ static int step_guide(void)
     }
 }
 
+/* --- forms ------------------------------------------------------------------- */
+
+enum { F_TEXT, F_PASS, F_CHECK, F_CHOICE };
+struct field {
+    const char *label;
+    char *buf;
+    int size, kind, *flag, hidden;
+    const char **opts; /* F_CHOICE: what to choose from; *flag is the choice */
+    int nopts;
+    const char *hint;  /* shown greyed in an empty field: "optional", an example */
+    int gap;           /* an empty row before it */
+};
+
+static void edit_utf8(char *buf, int size, wint_t c)
+{
+    if (c == 127 || c == 8 || c == KEY_BACKSPACE) {
+        int n = strlen(buf);
+        while (n > 0 && (buf[n - 1] & 0xC0) == 0x80)
+            n--;
+        if (n > 0)
+            buf[n - 1] = 0;
+        return;
+    }
+    char mb[8];
+    mbstate_t st = { 0 };
+    size_t k = wcrtomb(mb, c, &st);
+    if (k != (size_t)-1 && strlen(buf) + k < (size_t)size) {
+        mb[k] = 0;
+        strcat(buf, mb);
+    }
+}
+
+/* one round of a form: its fields under a title, then a key.  Tab and the
+ * arrows go through the fields, Space ticks a box, ← → and Space change a
+ * choice, F2 shows the passwords.  NEXT on Enter (from any field), BACK on
+ * Esc, STAY on anything else.  It scrolls when it is longer than the screen. */
+static int form_round(const char *head, const char *intro, struct field *f, int nf, int *cur,
+                      const char *err, const char *keys)
+{
+    static int show_pw, top;
+    for (int i = 0; i < nf && f[*cur].hidden; i++)
+        *cur = (*cur + 1) % nf;
+    if (too_small()) {
+        wint_t c;
+        key(&c);
+        return STAY;
+    }
+    chrome(keys);
+    int y = CY;
+    title(&y, head);
+    if (intro) {
+        y = wrap(y, CX, CW, CY + CH - 6, intro);
+        y++;
+    }
+    int lw = 0;
+    for (int i = 0; i < nf; i++)
+        if (!f[i].hidden && f[i].kind != F_CHECK && dwidth(f[i].label) > lw)
+            lw = dwidth(f[i].label);
+    lw += 2;
+    int iw = CW - lw - 2 < 46 ? CW - lw - 2 : 46;
+    int ry[32] = { 0 }, rows = 0;
+    for (int i = 0; i < nf && i < 32; i++) {
+        if (f[i].hidden)
+            continue;
+        if (f[i].gap && rows)
+            rows++;
+        ry[i] = rows++;
+    }
+    int errrows = err ? wrapped_lines(CW, err) + 1 : 0;
+    int avail = CY + CH - y - errrows;
+    if (avail < 3)
+        avail = 3;
+    if (rows <= avail || ry[*cur] < top)
+        top = rows <= avail ? 0 : ry[*cur];
+    if (ry[*cur] >= top + avail)
+        top = ry[*cur] - avail + 1;
+    int cy = y, cx = CX;
+    for (int i = 0; i < nf && i < 32; i++) {
+        if (f[i].hidden || ry[i] < top || ry[i] >= top + avail)
+            continue;
+        int yy = y + ry[i] - top, on = i == *cur;
+        if (f[i].kind == F_CHECK) {
+            if (on)
+                attron(A_BOLD);
+            put(yy, CX, *f[i].flag ? "[x]" : "[ ]", 3);
+            put(yy, CX + 4, f[i].label, CW - 4);
+            if (on) {
+                attroff(A_BOLD);
+                cy = yy;
+                cx = CX + 1;
+            }
+            continue;
+        }
+        if (on)
+            attron(A_BOLD);
+        put(yy, CX, f[i].label, lw);
+        if (on)
+            attroff(A_BOLD);
+        char txt[300];
+        if (f[i].kind == F_CHOICE) {
+            snprintf(txt, sizeof txt, "< %s >", f[i].opts[*f[i].flag]);
+        } else if (f[i].kind == F_PASS && !show_pw) {
+            int n = dwidth(f[i].buf), k = 0;
+            for (; k < n && k < 290; k++)
+                txt[k] = '*';
+            txt[k] = 0;
+        } else {
+            snprintf(txt, sizeof txt, "%s", f[i].buf);
+        }
+        /* (the line of an empty field begins after its hint) */
+        int skip = !*txt && f[i].hint && !on ? dwidth(f[i].hint) + 1 : 0;
+        attron(on ? COLOR_PAIR(C_SEL) : COLOR_PAIR(C_DIM) | A_BOLD);
+        if (on)
+            mvhline(yy, CX + lw, ' ', iw);
+        else if (f[i].kind != F_CHOICE && iw - 1 - skip > 0)
+            mvhline(yy, CX + lw + 1 + skip, '_', iw - 1 - skip);
+        attroff(on ? COLOR_PAIR(C_SEL) : COLOR_PAIR(C_DIM) | A_BOLD);
+        if (!*txt && f[i].hint && !on) {
+            attron(COLOR_PAIR(C_DIM) | A_BOLD);
+            put(yy, CX + lw + 1, f[i].hint, iw - 2);
+            attroff(COLOR_PAIR(C_DIM) | A_BOLD);
+        } else {
+            const char *vis = txt; /* the end of a long one in sight */
+            while (on && f[i].kind != F_CHOICE && dwidth(vis) > iw - 2 && *vis)
+                vis++;
+            if (on)
+                attron(COLOR_PAIR(C_SEL));
+            put(yy, CX + lw + 1, vis, iw - 2);
+            if (on) {
+                attroff(COLOR_PAIR(C_SEL));
+                cy = yy;
+                cx = CX + lw + 1 + (f[i].kind == F_CHOICE ? 0 : dwidth(vis) < iw - 2 ? dwidth(vis) : iw - 2);
+            }
+        }
+    }
+    attron(COLOR_PAIR(C_DIM) | A_BOLD);
+    if (top > 0)
+        mvaddch(y, CX + CW - 1, ACS_UARROW);
+    if (rows > top + avail)
+        mvaddch(y + avail - 1, CX + CW - 1, ACS_DARROW);
+    attroff(COLOR_PAIR(C_DIM) | A_BOLD);
+    if (err) {
+        attron(COLOR_PAIR(C_ERR) | A_BOLD);
+        wrap(CY + CH - errrows + 1, CX, CW, CY + CH, err);
+        attroff(COLOR_PAIR(C_ERR) | A_BOLD);
+    }
+    struct field *fc = &f[*cur];
+    move(cy, cx);
+    curs_set(fc->kind == F_TEXT || fc->kind == F_PASS);
+    present();
+    wint_t c;
+    int r = key(&c);
+    curs_set(0);
+    int dir = 0;
+    if (r == KEY_CODE_YES) {
+        switch (c) {
+        case KEY_UP:
+        case KEY_BTAB: dir = -1; break;
+        case KEY_DOWN: dir = 1; break;
+        case KEY_LEFT:
+        case KEY_RIGHT:
+            if (fc->kind == F_CHOICE)
+                *fc->flag = (*fc->flag + (c == KEY_RIGHT ? 1 : fc->nopts - 1)) % fc->nopts;
+            break;
+        case KEY_ENTER: return NEXT;
+        case KEY_F(2): show_pw = !show_pw; break;
+        case KEY_F(10): ask_quit(); break;
+        case KEY_BACKSPACE:
+            if (fc->buf)
+                edit_utf8(fc->buf, fc->size, c);
+            break;
+        }
+    } else if (r == OK) {
+        if (c == '\t')
+            dir = 1;
+        else if (c == 27)
+            return BACK;
+        else if (c == '\n' || c == '\r')
+            return NEXT;
+        else if (c == ' ' && fc->kind == F_CHECK)
+            *fc->flag = !*fc->flag;
+        else if (c == ' ' && fc->kind == F_CHOICE)
+            *fc->flag = (*fc->flag + 1) % fc->nopts;
+        else if (fc->buf && (c == 127 || c == 8 || c >= 32))
+            edit_utf8(fc->buf, fc->size, c);
+    }
+    if (dir) {
+        do
+            *cur = (*cur + dir + nf) % nf;
+        while (f[*cur].hidden);
+    }
+    return STAY;
+}
+
 /* --- 3. network (what nmtui does, simpler) ---------------------------------- */
 
 struct wifi {
@@ -866,7 +1398,13 @@ struct wifi {
 };
 static struct wifi nets[64];
 static int nnets, wifi_dev;
-static char wired[160], net_line[200];
+static char wired[160], eth[32], net_line[200];
+
+/* the connections made here that the installed system is to keep */
+static struct {
+    char uuid[40], name[100];
+} kept[8];
+static int nkept;
 
 static int have_nmcli(void)
 {
@@ -877,9 +1415,9 @@ static int have_nmcli(void)
 static void net_scan(int rescan)
 {
     char out[16384];
-    /* the devices: what is connected */
+    /* the devices: what is connected, and the cable's one */
     char *dev[] = { "nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", NULL };
-    wired[0] = 0;
+    wired[0] = eth[0] = 0;
     wifi_dev = 0;
     if (run(dev, out, sizeof out) == 0) {
         for (char *l = strtok(out, "\n"); l; l = strtok(NULL, "\n")) {
@@ -897,8 +1435,13 @@ static void net_scan(int rescan)
                 continue;
             if (!strcmp(f[1], "wifi"))
                 wifi_dev = 1;
-            if (!strcmp(f[1], "ethernet") && !strncmp(f[2], "connected", 9))
-                snprintf(wired, sizeof wired, "%s", f[0]);
+            if (!strcmp(f[1], "ethernet")) {
+                int up = !strncmp(f[2], "connected", 9);
+                if (!*eth || up)
+                    snprintf(eth, sizeof eth, "%s", f[0]);
+                if (up)
+                    snprintf(wired, sizeof wired, "%s", f[0]);
+            }
         }
     }
     char *chk[] = { "nmcli", "networking", "connectivity", "check", NULL };
@@ -967,54 +1510,389 @@ static void net_scan(int rescan)
             }
 }
 
-static int net_connect(const char *ssid, const char *security, int hidden)
+/* a connection as the form below describes it: what it needs besides a
+ * password */
+enum { NK_WIFI, NK_WIRED, NK_PPPOE };
+enum { SEC_OPEN, SEC_PSK, SEC_SAE, SEC_EAP, SEC_WEP };
+static const char *eaps[] = { "peap", "ttls", "pwd" };
+static const char *phase2s[] = { "mschapv2", "pap", "gtc", "md5" };
+
+struct netcfg {
+    int kind, hidden;
+    char ssid[96];
+    int sec, eap, phase2;
+    char pw[128];                                      /* Wi-Fi's password or key; 802.1X's; PPPoE's */
+    char login[128], anon[128], ca[256], domain[128]; /* 802.1X; the login is PPPoE's too */
+    char service[64];                                  /* PPPoE */
+    int more, manual, keep;
+    char addr[64], gw[64], dns[160], mac[40];
+};
+static struct netcfg last; /* the last form, filled in again for another try */
+
+static void net_new(struct netcfg *c, int kind)
 {
-    char pw[128] = "";
-    if (*security || hidden) {
-        char prompt[200];
-        snprintf(prompt, sizeof prompt, T("The password of \"%s\":", "Пароль сети «%s»:"), ssid);
-        if (!ask_line(T("Wi-Fi", "Wi-Fi"), prompt, pw, sizeof pw, 1))
+    memset(c, 0, sizeof *c);
+    c->kind = kind;
+    c->keep = 1;
+    c->more = kind == NK_WIRED; /* (what that form is for) */
+}
+
+/* the security of a network, as `nmcli device wifi list` puts it */
+static int sec_of(const char *s)
+{
+    if (!*s)
+        return SEC_OPEN;
+    if (strstr(s, "802.1X"))
+        return SEC_EAP;
+    if (strstr(s, "WEP"))
+        return SEC_WEP;
+    if (strstr(s, "WPA3") && !strstr(s, "WPA2") && !strstr(s, "WPA1"))
+        return SEC_SAE;
+    return SEC_PSK;
+}
+
+static int hex_len(const char *s)
+{
+    for (const char *p = s; *p; p++)
+        if (!isxdigit((unsigned char)*p))
+            return -1;
+    return strlen(s);
+}
+
+/* an IPv4 address; with prefix_ok, a /prefix after it may follow */
+static int valid_ip4(const char *s, int prefix_ok)
+{
+    char a[64];
+    snprintf(a, sizeof a, "%s", s);
+    char *slash = strchr(a, '/');
+    if (slash) {
+        char *e;
+        long p = strtol(slash + 1, &e, 10);
+        if (!prefix_ok || e == slash + 1 || *e || p < 0 || p > 32)
             return 0;
+        *slash = 0;
     }
-    char head[160];
-    snprintf(head, sizeof head, T("Connecting to %s", "Подключение к %s"), ssid);
-    busy(head);
-    char *argv[12];
-    int a = 0;
-    argv[a++] = "nmcli";
-    argv[a++] = "device";
-    argv[a++] = "wifi";
-    argv[a++] = "connect";
-    argv[a++] = (char *)ssid;
-    if (*pw) {
-        argv[a++] = "password";
-        argv[a++] = pw;
-    }
-    if (hidden) {
-        argv[a++] = "hidden";
-        argv[a++] = "yes";
-    }
-    argv[a] = NULL;
-    char out[2048];
-    int r = run(argv, out, sizeof out);
-    memset(pw, 0, sizeof pw);
-    if (r != 0) {
-        char text[2400];
-        out[strcspn(out, "\n")] = 0;
-        snprintf(text, sizeof text, "%s\n\n%s",
-                 T("Could not connect. Check the password and try again.",
-                   "Не удалось подключиться. Проверьте пароль и попробуйте ещё раз."),
-                 out);
-        msg(T("Wi-Fi", "Wi-Fi"), text);
+    struct in_addr in;
+    return inet_pton(AF_INET, a, &in) == 1;
+}
+
+static int valid_dns(const char *s)
+{
+    char a[200];
+    snprintf(a, sizeof a, "%s", s);
+    int n = 0;
+    for (char *t = strtok(a, " ,"); t; t = strtok(NULL, " ,"), n++)
+        if (!valid_ip4(t, 0))
+            return 0;
+    return n > 0;
+}
+
+static int valid_mac(const char *s)
+{
+    if (!strcmp(s, "random") || !strcmp(s, "stable") || !strcmp(s, "permanent") || !strcmp(s, "preserve"))
+        return 1;
+    if (strlen(s) != 17)
         return 0;
+    for (int i = 0; i < 17; i++)
+        if (i % 3 == 2 ? s[i] != ':' && s[i] != '-' : !isxdigit((unsigned char)s[i]))
+            return 0;
+    return 1;
+}
+
+static const char *net_check(const struct netcfg *c)
+{
+    size_t n = strlen(c->pw);
+    if (c->kind == NK_WIFI) {
+        if (!*c->ssid)
+            return T("Type the name of the network.", "Введите имя сети.");
+        if ((c->sec == SEC_PSK || c->sec == SEC_SAE) && !(n >= 8 && n <= 63) && hex_len(c->pw) != 64)
+            return T("A WPA password is 8 to 63 characters long (or 64 hexadecimal digits).",
+                     "Пароль WPA — от 8 до 63 символов (или 64 шестнадцатеричные цифры).");
+        if (c->sec == SEC_WEP && n != 5 && n != 13 && hex_len(c->pw) != 10 && hex_len(c->pw) != 26)
+            return T("A WEP key is 5 or 13 characters, or 10 or 26 hexadecimal digits.",
+                     "Ключ WEP — 5 или 13 символов либо 10 или 26 шестнадцатеричных цифр.");
+        if (c->sec == SEC_EAP && !*c->login)
+            return T("Type the login (identity) you were given for this network.",
+                     "Введите логин (identity), выданный для этой сети.");
+        if (c->sec == SEC_EAP && *c->ca && access(c->ca, R_OK) != 0)
+            return T("There is no such file of a CA certificate.", "Файла сертификата CA с таким путём нет.");
+    }
+    if (c->kind == NK_PPPOE && !*c->login)
+        return T("Type the login from your contract with the provider.", "Введите логин из договора с провайдером.");
+    if (c->more) {
+        if (c->manual && c->kind != NK_PPPOE && !valid_ip4(c->addr, 1))
+            return T("The address: four numbers with dots, and the prefix after a slash, as 192.168.1.50/24.",
+                     "Адрес: четыре числа через точку и префикс через косую черту, например 192.168.1.50/24.");
+        if (c->manual && c->kind != NK_PPPOE && *c->gw && !valid_ip4(c->gw, 0))
+            return T("The gateway: an address such as 192.168.1.1.", "Шлюз: адрес вида 192.168.1.1.");
+        if (*c->dns && !valid_dns(c->dns))
+            return T("DNS servers: addresses such as 1.1.1.1, separated by spaces.",
+                     "DNS-серверы: адреса вида 1.1.1.1 через пробел.");
+        if (*c->mac && !valid_mac(c->mac))
+            return T("The MAC address: six pairs of hexadecimal digits, as 00:11:22:33:44:55 (or random).",
+                     "MAC-адрес: шесть пар шестнадцатеричных цифр, например 00:11:22:33:44:55 (или random).");
+    }
+    return NULL;
+}
+
+/* what nmcli said, under what it means */
+static void net_fail(const char *what, char *out)
+{
+    out[strcspn(out, "\n")] = 0;
+    char text[2400];
+    snprintf(text, sizeof text, "%s\n\n%s", what, !strncmp(out, "Error: ", 7) ? out + 7 : out);
+    msg(T("Network", "Сеть"), text);
+}
+
+/* the connection made, as a NetworkManager profile (saved, so that the
+ * installed system can keep it), and brought up; 1 if it is up */
+static int net_apply(struct netcfg *c)
+{
+    char name[100], head[200];
+    if (c->kind == NK_WIFI)
+        snprintf(name, sizeof name, "%s", c->ssid);
+    else
+        snprintf(name, sizeof name, "%s", c->kind == NK_PPPOE ? "PPPoE" : T("Wired", "Проводное"));
+    snprintf(head, sizeof head, T("Connecting to %s", "Подключение к %s"), name);
+    busy(head);
+
+    /* a profile of the same name (an earlier try) gives way */
+    for (int i = 0; i < 4; i++) {
+        char *del[] = { "nmcli", "connection", "delete", "id", name, NULL };
+        if (run(del, NULL, 0) != 0)
+            break;
+    }
+
+    char addr[80], dns[200], mac[40], *a[64];
+    int n = 0;
+#define A(...)                                                                  \
+    do {                                                                        \
+        char *v_[] = { __VA_ARGS__ };                                           \
+        for (size_t i_ = 0; i_ < sizeof v_ / sizeof *v_ && n < 62; i_++)        \
+            a[n++] = v_[i_];                                                    \
+    } while (0)
+    A("nmcli", "connection", "add", "con-name", name);
+    if (c->kind == NK_WIFI) {
+        A("type", "wifi", "ssid", c->ssid);
+        if (c->hidden)
+            A("wifi.hidden", "yes");
+        switch (c->sec) {
+        case SEC_PSK: A("wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", c->pw); break;
+        case SEC_SAE: A("wifi-sec.key-mgmt", "sae", "wifi-sec.psk", c->pw); break;
+        case SEC_WEP: A("wifi-sec.key-mgmt", "none", "wifi-sec.wep-key-type", "key", "wifi-sec.wep-key0", c->pw); break;
+        case SEC_EAP:
+            A("wifi-sec.key-mgmt", "wpa-eap", "802-1x.eap", (char *)eaps[c->eap], "802-1x.identity", c->login);
+            if (*c->pw)
+                A("802-1x.password", c->pw);
+            if (c->eap != 2) { /* (PWD has no inner one) */
+                A("802-1x.phase2-auth", (char *)phase2s[c->phase2]);
+                if (*c->anon)
+                    A("802-1x.anonymous-identity", c->anon);
+            }
+            if (*c->ca)
+                A("802-1x.ca-cert", c->ca);
+            if (*c->domain)
+                A("802-1x.domain-suffix-match", c->domain);
+            break;
+        }
+    } else if (c->kind == NK_WIRED) {
+        A("type", "ethernet", "ifname", eth);
+    } else {
+        A("type", "pppoe", "pppoe.parent", eth, "pppoe.username", c->login);
+        if (*c->pw)
+            A("pppoe.password", c->pw);
+        if (*c->service)
+            A("pppoe.service", c->service);
+    }
+    if (c->more) {
+        if (c->manual && c->kind != NK_PPPOE) {
+            snprintf(addr, sizeof addr, strchr(c->addr, '/') ? "%s" : "%s/24", c->addr);
+            A("ipv4.method", "manual", "ipv4.addresses", addr);
+            if (*c->gw)
+                A("ipv4.gateway", c->gw);
+        }
+        if (*c->dns) {
+            snprintf(dns, sizeof dns, "%s", c->dns);
+            for (char *p = dns; *p; p++)
+                if (*p == ',')
+                    *p = ' ';
+            if (!c->manual || c->kind == NK_PPPOE)
+                A("ipv4.ignore-auto-dns", "yes"); /* these, not the ones DHCP gives */
+            A("ipv4.dns", dns);
+        }
+        if (*c->mac) {
+            snprintf(mac, sizeof mac, "%s", c->mac);
+            for (char *p = mac; *p; p++)
+                if (*p == '-')
+                    *p = ':';
+            A(c->kind == NK_WIFI ? "wifi.cloned-mac-address" : "ethernet.cloned-mac-address", mac);
+        }
+    }
+#undef A
+    a[n] = NULL;
+
+    char out[2048], uuid[40] = "";
+    int r = run(a, out, sizeof out);
+    /* "Connection 'NAME' (UUID) successfully added." */
+    const char *e = strstr(out, ") successfully added");
+    if (r == 0 && e) {
+        const char *b = e;
+        while (b > out && *b != '(')
+            b--;
+        if (*b == '(' && e - b < (int)sizeof uuid)
+            snprintf(uuid, e - b, "%s", b + 1);
+    }
+    if (r != 0 || !*uuid) {
+        net_fail(T("NetworkManager did not take these settings.", "NetworkManager не принял эти настройки."), out);
+        return 0;
+    }
+    char *up[] = { "nmcli", "--wait", "45", "connection", "up", "uuid", uuid, NULL };
+    if (run(up, out, sizeof out) != 0) {
+        /* (not left to be tried again and again by itself) */
+        char *del[] = { "nmcli", "connection", "delete", "uuid", uuid, NULL };
+        run(del, NULL, 0);
+        net_fail(c->kind == NK_WIFI ? T("Could not connect. Check the password and the other settings, and try again.",
+                                        "Не удалось подключиться. Проверьте пароль и остальные настройки и попробуйте ещё раз.")
+                                    : T("Could not connect. Check the cable and the settings, and try again.",
+                                        "Не удалось подключиться. Проверьте кабель и настройки и попробуйте ещё раз."),
+                 out);
+        return 0;
+    }
+    memset(c->pw, 0, sizeof c->pw);
+    if (c->keep && !net_only) {
+        int i = 0;
+        while (i < nkept && strcmp(kept[i].name, name))
+            i++;
+        if (i < 8) {
+            snprintf(kept[i].uuid, sizeof kept[i].uuid, "%s", uuid);
+            snprintf(kept[i].name, sizeof kept[i].name, "%s", name);
+            if (i == nkept)
+                nkept++;
+        }
     }
     net_scan(0);
     return 1;
 }
 
+/* the form of a connection; 1 when it is up */
+static int net_form(struct netcfg *c)
+{
+    const char *secs[] = {
+        [SEC_OPEN] = T("None (an open network)", "Нет (открытая сеть)"),
+        [SEC_PSK] = "WPA/WPA2 Personal",
+        [SEC_SAE] = "WPA3 Personal",
+        [SEC_EAP] = T("WPA Enterprise (802.1X, a login)", "WPA Enterprise (802.1X, логин)"),
+        [SEC_WEP] = T("WEP (an old one)", "WEP (устаревшая)"),
+    };
+    const char *ipv4s[] = { T("Automatic (DHCP)", "Автоматически (DHCP)"), T("By hand", "Вручную") };
+    static const char *eapn[] = { "PEAP", "TTLS", "PWD" };
+    static const char *ph2n[] = { "MSCHAPv2", "PAP", "GTC", "MD5" };
+    const char *optional = T("optional", "необязательно");
+    enum { W_SSID, W_SEC, W_EAP, W_PH2, W_LOGIN, W_PW, W_ANON, W_CA, W_DOMAIN, P_SERVICE,
+           N_MORE, N_IPV4, N_ADDR, N_GW, N_DNS, N_MAC, N_KEEP, NF };
+    struct field f[NF] = {
+        [W_SSID] = { .label = T("Network name", "Имя сети"), .buf = c->ssid, .size = sizeof c->ssid, .kind = F_TEXT },
+        [W_SEC] = { .label = T("Security", "Защита"), .kind = F_CHOICE, .flag = &c->sec, .opts = secs, .nopts = 5 },
+        [W_EAP] = { .label = T("Authentication", "Проверка подлинности"), .kind = F_CHOICE, .flag = &c->eap, .opts = eapn, .nopts = 3 },
+        [W_PH2] = { .label = T("Inner authentication", "Внутренняя проверка"), .kind = F_CHOICE, .flag = &c->phase2, .opts = ph2n, .nopts = 4 },
+        [W_LOGIN] = { .buf = c->login, .size = sizeof c->login, .kind = F_TEXT },
+        [W_PW] = { .buf = c->pw, .size = sizeof c->pw, .kind = F_PASS },
+        [W_ANON] = { .label = T("Anonymous identity", "Анонимная identity"), .buf = c->anon, .size = sizeof c->anon, .kind = F_TEXT, .hint = optional },
+        [W_CA] = { .label = T("CA certificate", "Сертификат CA"), .buf = c->ca, .size = sizeof c->ca, .kind = F_TEXT,
+                   .hint = T("optional: a file, /path/ca.pem", "необязательно: файл, /путь/ca.pem") },
+        [W_DOMAIN] = { .label = T("Domain", "Домен"), .buf = c->domain, .size = sizeof c->domain, .kind = F_TEXT,
+                       .hint = T("optional: example.org", "необязательно: example.org") },
+        [P_SERVICE] = { .label = T("Service name", "Имя службы"), .buf = c->service, .size = sizeof c->service, .kind = F_TEXT, .hint = optional },
+        [N_MORE] = { .label = T("Set the address, DNS or MAC by hand", "Задать адрес, DNS или MAC вручную"), .kind = F_CHECK, .flag = &c->more, .gap = 1 },
+        [N_IPV4] = { .label = T("IPv4 address", "Адрес IPv4"), .kind = F_CHOICE, .flag = &c->manual, .opts = ipv4s, .nopts = 2 },
+        [N_ADDR] = { .label = T("Address/prefix", "Адрес/префикс"), .buf = c->addr, .size = sizeof c->addr, .kind = F_TEXT,
+                     .hint = T("e.g. 192.168.1.50/24", "например, 192.168.1.50/24") },
+        [N_GW] = { .label = T("Gateway", "Шлюз"), .buf = c->gw, .size = sizeof c->gw, .kind = F_TEXT,
+                   .hint = T("e.g. 192.168.1.1", "например, 192.168.1.1") },
+        [N_DNS] = { .label = T("DNS servers", "DNS-серверы"), .buf = c->dns, .size = sizeof c->dns, .kind = F_TEXT },
+        [N_MAC] = { .label = T("MAC address", "MAC-адрес"), .buf = c->mac, .size = sizeof c->mac, .kind = F_TEXT,
+                    .hint = T("optional: 00:11:22:33:44:55, random", "необязательно: 00:11:22:33:44:55, random") },
+        [N_KEEP] = { .label = T("Keep this connection in the installed system", "Сохранить подключение в установленной системе"),
+                     .kind = F_CHECK, .flag = &c->keep, .gap = 1 },
+    };
+    char head[160];
+    const char *intro;
+    if (c->kind == NK_WIFI) {
+        if (c->hidden)
+            snprintf(head, sizeof head, "%s", T("A hidden Wi-Fi network", "Скрытая сеть Wi-Fi"));
+        else
+            snprintf(head, sizeof head, "Wi-Fi: %s", c->ssid);
+        intro = T("Type the password and press Enter. Networks of companies and universities (802.1X) ask for a login as well; the address and DNS can be set by hand below.",
+                  "Введите пароль и нажмите Enter. Сети компаний и университетов (802.1X) просят ещё и логин; адрес и DNS можно задать вручную ниже.");
+    } else if (c->kind == NK_WIRED) {
+        snprintf(head, sizeof head, T("Wired connection (%s)", "Проводное подключение (%s)"), eth);
+        intro = T("For a network without DHCP, or a provider that expects a fixed address or a particular MAC address. Enter connects.",
+                  "Для сети без DHCP или провайдера, который ждёт постоянный адрес или определённый MAC-адрес. Enter — подключиться.");
+    } else {
+        snprintf(head, sizeof head, T("DSL and PPPoE (over %s)", "DSL и PPPoE (через %s)"), eth);
+        intro = T("Many home connections work so: a cable from the provider, or a DSL modem in bridge mode. The login and the password are in the contract.",
+                  "Так работают многие домашние подключения: кабель провайдера или DSL-модем в режиме моста. Логин и пароль — в договоре.");
+    }
+    int cur = c->kind == NK_WIRED ? N_IPV4 : c->kind == NK_PPPOE ? W_LOGIN
+            : c->hidden ? W_SSID : c->sec == SEC_EAP ? W_LOGIN : c->sec == SEC_OPEN ? N_MORE : W_PW;
+    const char *err = NULL;
+    for (;;) {
+        int wifi = c->kind == NK_WIFI, ppp = c->kind == NK_PPPOE, eap = wifi && c->sec == SEC_EAP;
+        f[W_SSID].hidden = !(wifi && c->hidden);
+        f[W_SEC].hidden = !wifi;
+        f[W_EAP].hidden = f[W_CA].hidden = f[W_DOMAIN].hidden = !eap;
+        f[W_PH2].hidden = f[W_ANON].hidden = !eap || c->eap == 2;
+        f[W_LOGIN].hidden = !(eap || ppp);
+        f[W_PW].hidden = !(ppp || (wifi && c->sec != SEC_OPEN));
+        f[P_SERVICE].hidden = !ppp;
+        f[N_MORE].hidden = c->kind == NK_WIRED;
+        f[N_IPV4].hidden = !c->more || ppp;
+        f[N_ADDR].hidden = f[N_GW].hidden = !c->more || ppp || !c->manual;
+        f[N_DNS].hidden = f[N_MAC].hidden = !c->more;
+        f[N_KEEP].hidden = net_only;
+        f[W_LOGIN].label = ppp ? T("Login", "Логин") : T("Login (identity)", "Логин (identity)");
+        f[W_PW].label = wifi && c->sec == SEC_WEP ? T("Key", "Ключ") : T("Password", "Пароль");
+        f[N_DNS].hint = c->manual && !ppp ? T("e.g. 1.1.1.1 8.8.8.8", "например, 1.1.1.1 8.8.8.8")
+                                          : T("optional: 1.1.1.1 8.8.8.8", "необязательно: 1.1.1.1 8.8.8.8");
+        int r = form_round(head, intro, f, NF, &cur, err,
+                           T("Tab ↑↓: field   ←→ Space: change   F2: passwords   Enter: connect   Esc: back",
+                             "Tab ↑↓: поле   ←→ Пробел: выбор   F2: пароли   Enter: подключить   Esc: назад"));
+        if (r == BACK)
+            return 0;
+        if (r == STAY) {
+            err = NULL;
+            continue;
+        }
+        err = net_check(c);
+        if (!err && net_apply(c))
+            return 1;
+    }
+}
+
+enum { K_GO, K_NET, K_HIDDEN, K_WIRED, K_PPPOE, K_RESCAN, K_SKIP };
+static int net_kind[72], net_idx[72];
+
 static const char *net_desc(int i)
 {
-    (void)i;
+    static char d[300];
+    switch (net_kind[i]) {
+    case K_NET: {
+        const struct wifi *w = &nets[net_idx[i]];
+        snprintf(d, sizeof d, T("%s, the signal %d%%. Enter: the password (or a login), and the address by hand if it is needed.",
+                                "%s, сигнал %d%%. Enter: пароль (или логин), при необходимости адрес вручную."),
+                 *w->security ? w->security : T("Open", "Открытая"), w->signal);
+        return d;
+    }
+    case K_HIDDEN:
+        return T("A network that does not show its name: type the name, choose the security, type the password.",
+                 "Сеть, которая не показывает имя: введите имя, выберите защиту, введите пароль.");
+    case K_WIRED:
+        return T("For a cable without DHCP: a fixed address, the gateway and DNS servers; or the MAC address the provider expects.",
+                 "Для кабеля без DHCP: постоянный адрес, шлюз и DNS-серверы; или MAC-адрес, которого ждёт провайдер.");
+    case K_PPPOE:
+        return T("A connection with a login and a password from the provider (PPPoE): its cable, or a DSL modem in bridge mode.",
+                 "Подключение по логину и паролю от провайдера (PPPoE): его кабель или DSL-модем в режиме моста.");
+    }
     return net_line;
 }
 
@@ -1030,12 +1908,11 @@ static int step_network(void)
     for (;;) {
         static char labels[72][160];
         static const char *items[72];
-        int kind[72], idx[72], n = 0;
-        enum { K_GO, K_NET, K_HIDDEN, K_RESCAN, K_SKIP };
+        int n = 0;
         if (S.online || net_only) {
             snprintf(labels[n], sizeof labels[n], "%s", S.online ? T("Continue: you are online", "Далее: интернет есть")
                                                                  : T("Close", "Закрыть"));
-            kind[n++] = K_GO;
+            net_kind[n++] = K_GO;
         }
         for (int i = 0; i < nnets && n < 64; i++) {
             int bars = nets[i].signal >= 75 ? 4 : nets[i].signal >= 50 ? 3 : nets[i].signal >= 25 ? 2 : 1;
@@ -1043,19 +1920,26 @@ static int step_network(void)
                                  : (bars == 4 ? "####" : bars == 3 ? "### " : bars == 2 ? "##  " : "#   ");
             snprintf(labels[n], sizeof labels[n], "%-28.28s %s  %s", nets[i].ssid, b,
                      nets[i].inuse ? T("connected", "подключено")
+                     : sec_of(nets[i].security) == SEC_EAP ? T("login", "логин")
                      : *nets[i].security ? T("password", "пароль") : T("open", "открытая"));
-            kind[n] = K_NET;
-            idx[n++] = i;
+            net_kind[n] = K_NET;
+            net_idx[n++] = i;
         }
         if (wifi_dev) {
             snprintf(labels[n], sizeof labels[n], "%s", T("Another network (hidden)...", "Другая сеть (скрытая)..."));
-            kind[n++] = K_HIDDEN;
-            snprintf(labels[n], sizeof labels[n], "%s", T("Search again", "Искать снова"));
-            kind[n++] = K_RESCAN;
+            net_kind[n++] = K_HIDDEN;
         }
+        if (*eth) {
+            snprintf(labels[n], sizeof labels[n], "%s", T("Cable: the address, DNS, MAC by hand...", "Кабель: адрес, DNS, MAC вручную..."));
+            net_kind[n++] = K_WIRED;
+            snprintf(labels[n], sizeof labels[n], "%s", T("DSL / PPPoE: a login from the provider...", "DSL / PPPoE: логин от провайдера..."));
+            net_kind[n++] = K_PPPOE;
+        }
+        snprintf(labels[n], sizeof labels[n], "%s", T("Search again", "Искать снова"));
+        net_kind[n++] = K_RESCAN;
         if (!S.online && !net_only) {
             snprintf(labels[n], sizeof labels[n], "%s", T("Continue without the internet", "Продолжить без интернета"));
-            kind[n++] = K_SKIP;
+            net_kind[n++] = K_SKIP;
         }
         for (int i = 0; i < n; i++)
             items[i] = labels[i];
@@ -1089,7 +1973,8 @@ static int step_network(void)
         int r = run_menu(&m, &sel);
         if (r != NEXT)
             return r == BACK && net_only ? (ask_quit(), STAY) : r;
-        switch (kind[sel]) {
+        struct netcfg c;
+        switch (net_kind[sel]) {
         case K_GO:
             if (net_only)
                 quit_installer();
@@ -1099,17 +1984,73 @@ static int step_network(void)
         case K_RESCAN:
             busy(T("Looking for networks", "Поиск сетей"));
             net_scan(1);
-            break;
-        case K_HIDDEN: {
-            char ssid[96] = "";
-            if (ask_line(T("Hidden network", "Скрытая сеть"), T("The name of the network:", "Имя сети:"), ssid, sizeof ssid, 0) && *ssid)
-                net_connect(ssid, "", 1);
+            continue;
+        case K_NET: {
+            const struct wifi *w = &nets[net_idx[sel]];
+            if (last.kind == NK_WIFI && !last.hidden && !strcmp(last.ssid, w->ssid)) {
+                c = last;
+            } else {
+                net_new(&c, NK_WIFI);
+                snprintf(c.ssid, sizeof c.ssid, "%s", w->ssid);
+                c.sec = sec_of(w->security);
+            }
             break;
         }
-        case K_NET:
-            if (net_connect(nets[idx[sel]].ssid, nets[idx[sel]].security, 0) && S.online)
-                sel = 0;
+        case K_HIDDEN:
+            if (last.kind == NK_WIFI && last.hidden) {
+                c = last;
+            } else {
+                net_new(&c, NK_WIFI);
+                c.hidden = 1;
+                c.sec = SEC_PSK;
+            }
             break;
+        default: { /* K_WIRED, K_PPPOE */
+            int kind = net_kind[sel] == K_WIRED ? NK_WIRED : NK_PPPOE;
+            if (last.kind == kind)
+                c = last;
+            else
+                net_new(&c, kind);
+            break;
+        }
+        }
+        int ok = net_form(&c);
+        last = c;
+        if (ok && S.online)
+            sel = 0;
+    }
+}
+
+/* the files of the connections the installed system keeps, a line each */
+static void kept_files(char *out, size_t size)
+{
+    out[0] = 0;
+    if (!nkept)
+        return;
+    static char list[16384];
+    char *a[] = { "nmcli", "-t", "-f", "UUID,FILENAME", "connection", "show", NULL };
+    if (run(a, list, sizeof list) != 0)
+        return;
+    for (char *l = strtok(list, "\n"); l; l = strtok(NULL, "\n")) {
+        char *colon = strchr(l, ':');
+        if (!colon)
+            continue;
+        *colon = 0;
+        for (int i = 0; i < nkept; i++) {
+            if (strcmp(l, kept[i].uuid))
+                continue;
+            /* (terse output escapes ':' and '\' in the name of the file) */
+            char file[512];
+            int n = 0;
+            for (char *p = colon + 1; *p && n < 511; p++) {
+                if (*p == '\\' && p[1])
+                    p++;
+                file[n++] = *p;
+            }
+            file[n] = 0;
+            /* (one kept only in memory, under /run, is not one to copy) */
+            if (!strncmp(file, "/etc/", 5) && strlen(out) + n + 2 < size)
+                strcat(strcat(out, file), "\n");
         }
     }
 }
@@ -1296,32 +2237,6 @@ static int valid_host(const char *h)
     return 1;
 }
 
-enum { F_TEXT, F_PASS, F_CHECK };
-struct field {
-    const char *label;
-    char *buf;
-    int size, kind, *flag, hidden;
-};
-
-static void edit_utf8(char *buf, int size, wint_t c)
-{
-    if (c == 127 || c == 8 || c == KEY_BACKSPACE) {
-        int n = strlen(buf);
-        while (n > 0 && (buf[n - 1] & 0xC0) == 0x80)
-            n--;
-        if (n > 0)
-            buf[n - 1] = 0;
-        return;
-    }
-    char mb[8];
-    mbstate_t st = { 0 };
-    size_t k = wcrtomb(mb, c, &st);
-    if (k != (size_t)-1 && strlen(buf) + k < (size_t)size) {
-        mb[k] = 0;
-        strcat(buf, mb);
-    }
-}
-
 static const char *user_check(void)
 {
     if (!*S.fullname)
@@ -1366,7 +2281,7 @@ static int step_user(void)
             cur = cur < 5 ? 4 : 7;
         if (too_small()) {
             wint_t c;
-            get_wch(&c);
+            key(&c);
             continue;
         }
         chrome(T("↑↓ Tab: field   Space: tick   Enter: next   Esc: back   F10: quit",
@@ -1439,9 +2354,9 @@ static int step_user(void)
         }
         move(cy, cx);
         curs_set(f[cur].kind == F_CHECK ? 0 : 1);
-        refresh();
+        present();
         wint_t c;
-        int r = get_wch(&c);
+        int r = key(&c);
         curs_set(0);
         int move_dir = 0;
         if (r == KEY_CODE_YES) {
@@ -1499,13 +2414,32 @@ static const char *opt_desc(int i)
     return ru ? desc_table[i].ru : desc_table[i].en;
 }
 
+/* the screenshot of a choice, as Calamares had them (default.nix makes them
+ * of ../../branding/screenshots) */
+static const char *opt_pic(int i)
+{
+    static char name[48];
+    const struct opt *o = &desc_table[i];
+    if (desc_table == desktops)
+        snprintf(name, sizeof name, "%s", !strcmp(o->id, "none") ? "nodesktop" : !strcmp(o->id, "plasma") ? "plasma6" : o->id);
+    else if (desc_table == dms)
+        snprintf(name, sizeof name, "dm-%s", o->id);
+    else if (desc_table == shells)
+        snprintf(name, sizeof name, "shell-%s", o->id);
+    else if (desc_table == loaders || !strcmp(o->id, "grub"))
+        snprintf(name, sizeof name, "boot-%s", o->id);
+    else
+        return NULL;
+    return name;
+}
+
 static int choose(const char *head, const char *intro, const struct opt *o, int n, int *sel)
 {
     static const char *items[16];
     for (int i = 0; i < n; i++)
         items[i] = optname(&o[i]);
     desc_table = o;
-    struct menu m = { .title = head, .intro = intro, .items = items, .n = n, .desc = opt_desc };
+    struct menu m = { .title = head, .intro = intro, .items = items, .n = n, .desc = opt_desc, .pic = opt_pic };
     return run_menu(&m, sel);
 }
 
@@ -1743,7 +2677,12 @@ static int step_summary(void)
         struct { const char *k; char v[256]; } rows[12];
         int n = 0;
 #define ROW(key, ...) do { rows[n].k = key; snprintf(rows[n].v, sizeof rows[n].v, __VA_ARGS__); n++; } while (0)
-        ROW(T("Network", "Сеть"), "%s", S.online ? T("online", "есть") : T("offline", "нет"));
+        char names[200] = "";
+        for (int i = 0; i < nkept; i++)
+            snprintf(names + strlen(names), sizeof names - strlen(names), "%s%s%s%s", i ? ", " : "",
+                     T("\"", "«"), kept[i].name, T("\"", "»"));
+        ROW(T("Network", "Сеть"), "%s%s%s", S.online ? T("online", "есть") : T("offline", "нет"),
+            nkept ? T("; the installed system keeps ", "; в установленной системе останется ") : "", names);
         ROW(T("Time zone", "Часовой пояс"), "%s", S.tz);
         ROW(T("Language", "Язык"), "%s", locales[S.locale].name);
         ROW(T("Keyboard", "Клавиатура"), "%s", keyboards[S.kb].name);
@@ -1779,9 +2718,9 @@ static int step_summary(void)
             wrap(y, CX, CW, CY + CH, warn);
             attroff(COLOR_PAIR(C_ERR) | A_BOLD);
         }
-        refresh();
+        present();
         wint_t c;
-        int r = get_wch(&c);
+        int r = key(&c);
         if ((r == OK && (c == '\n' || c == '\r')) || (r == KEY_CODE_YES && c == KEY_ENTER)) {
             char q[300];
             if (S.manual)
@@ -1839,21 +2778,136 @@ static void setenv_choices(void)
     setenv("NI_SHELL", shells[S.shell].id, 1);
     setenv("NI_LOADER", loaders[S.loader].id, 1);
     setenv("NI_UNFREE", S.unfree ? "1" : "0", 1);
+    char files[4096];
+    kept_files(files, sizeof files);
+    setenv("NI_NM_KEEP", files, 1);
     setenv("NI_DRY", dry ? "1" : "0", 1);
 }
 
 #define NLOG 400
-static char *logl[NLOG];
+static char *loglines[NLOG];
 static int nlog;
 
 static void log_add(const char *l)
 {
     if (nlog == NLOG) {
-        free(logl[0]);
-        memmove(logl, logl + 1, sizeof *logl * (NLOG - 1));
+        free(loglines[0]);
+        memmove(loglines, loglines + 1, sizeof *loglines * (NLOG - 1));
         nlog--;
     }
-    logl[nlog++] = strdup(l);
+    loglines[nlog++] = strdup(l);
+}
+
+/* the slides while it installs: those of Calamares (../calamares-nixithos/
+ * show.qml), a tip each about what the installed system has, some with a
+ * screenshot; [0] English, [1] Russian */
+static const struct tip {
+    const char *kicker[2], *title[2], *body[2], *cmd, *img;
+} tips[] = {
+    { { "NixithOS", "NixithOS" }, { "NixOS, without systemd", "NixOS без systemd" },
+      { "PID 1 is s6-linux-init, services run under s6-rc, devices are eudev's and logs s6-log's. The packages, the modules and configuration.nix are NixOS's own.",
+        "PID 1 — s6-linux-init, службы работают под s6-rc, устройства — от eudev, журналы — от s6-log. Пакеты, модули и configuration.nix — те же, что в NixOS." },
+      "cat /proc/1/comm      # s6-svscan", NULL },
+    { { "Configuration", "Конфигурация" }, { "One file describes the whole system", "Вся система описана одним файлом" },
+      { "Users, services, desktop, packages: everything is in /etc/nixith/configuration.nix. Change it, then build and switch to it in one go.",
+        "Пользователи, службы, рабочий стол, пакеты — всё в /etc/nixith/configuration.nix. Измените его, а потом соберите систему и переключитесь на неё одной командой." },
+      "sudo nixith switch", NULL },
+    { { "Configuration", "Конфигурация" }, { "Rebuild only the part you changed", "Пересобрать только изменённое" },
+      { "--only takes an option or a group of them; everything else stays exactly as in the running system, even half-done edits elsewhere in the file.",
+        "--only принимает опцию или группу опций; всё остальное остаётся точно таким, как в работающей системе, даже недописанные правки в других местах файла." },
+      "sudo nixith switch --only services.openssh", NULL },
+    { { "Generations", "Поколения" }, { "Every change can be undone", "Любое изменение можно отменить" },
+      { "Each switch is a new generation, and the boot menu lists them all. Something broke? Go back to the previous one, or pick it when the machine starts.",
+        "Каждый switch — новое поколение, и меню загрузки показывает их все. Что-то сломалось? Вернитесь к предыдущему или выберите его при включении." },
+      "nixith generations\nsudo nixith rollback", "dwl" },
+    { { "Generations", "Поколения" }, { "Try a configuration before keeping it", "Попробовать конфигурацию, прежде чем оставить" },
+      { "build-vm builds the same system into a script that starts it in QEMU, without touching the one you are running.",
+        "build-vm собирает ту же систему в скрипт, который запускает её в QEMU, не трогая работающую." },
+      "nixith build-vm && ./result/bin/run-*-vm", NULL },
+    { { "Services", "Службы" }, { "systemctl still works", "systemctl по-прежнему работает" },
+      { "It is a thin wrapper over s6-rc: start, stop, restart, status. The native tools are there too.",
+        "Это тонкая обёртка над s6-rc: start, stop, restart, status. Родные инструменты тоже на месте." },
+      "systemctl restart sshd\ns6-rc -a list", NULL },
+    { { "Services", "Службы" }, { "Logs are plain files", "Журналы — обычные файлы" },
+      { "Every service writes to /var/log/s6/<service>/ through its own logger; journalctl -u reads those directories.",
+        "Каждая служба пишет в /var/log/s6/<служба>/ через свой логгер; journalctl -u читает эти каталоги." },
+      "journalctl -u sshd -f\ntail -F /var/log/s6/sshd/current", NULL },
+    { { "Packages", "Пакеты" }, { "Over 140 000 packages, from the cache", "Больше 140 000 пакетов, из кэша" },
+      { "NixithOS uses the same nixpkgs and the same binaries as NixOS; only libsystemd and libudev are swapped for elogind's and eudev's under them. Nothing is compiled.",
+        "NixithOS берёт те же nixpkgs и те же готовые пакеты, что и NixOS; под ними подменены только libsystemd и libudev — на elogind и eudev. Ничего не компилируется." },
+      NULL, "parallax" },
+    { { "Packages", "Пакеты" }, { "Use a program without installing it", "Программа без установки" },
+      { "nix-shell gives you a shell with the packages you name; when you leave it, nothing has changed in the system.",
+        "nix-shell даёт оболочку с названными пакетами; после выхода из неё в системе ничего не меняется." },
+      "nix-shell -p htop ripgrep", NULL },
+    { { "Packages", "Пакеты" }, { "Install for good", "Установить насовсем" },
+      { "Add the package to environment.systemPackages (for everyone) or to users.users.<you>.packages, and switch. search.nixos.org has the names.",
+        "Добавьте пакет в environment.systemPackages (для всех) или в users.users.<вы>.packages и сделайте switch. Имена — на search.nixos.org." },
+      "environment.systemPackages = [ pkgs.btop ];", NULL },
+    { { "Desktops", "Рабочие столы" }, { "Add another desktop at any time", "Ещё один стол — в любой момент" },
+      { "Parallax, GNOME, Plasma, Hyprland, niri and dwl are one line each; every one you enable shows up in the login screen's list of sessions.",
+        "Parallax, GNOME, Plasma, Hyprland, niri и dwl — по одной строке; каждый включённый появляется в списке сеансов на экране входа." },
+      "nixithos.desktop.niri.enable = true;", "dm-ly" },
+    { { "Desktops", "Рабочие столы" }, { "The first keys to know", "Первые клавиши" },
+      { "Hyprland: Super+Q a terminal, Super+R programs, Super+M log out.\nniri: Super+T, Super+D, Super+Shift+/ for all the keys.\ndwl: Super+Shift+Enter, Super+P, Super+Shift+Q.",
+        "Hyprland: Super+Q — терминал, Super+R — программы, Super+M — выход.\nniri: Super+T, Super+D, Super+Shift+/ — все клавиши.\ndwl: Super+Shift+Enter, Super+P, Super+Shift+Q." },
+      NULL, "hyprland" },
+    { { "Shells", "Оболочки" }, { "Another shell later", "Другая оболочка — потом" },
+      { "bash, zsh, fish or nushell: the shell is a line in the configuration too, per user.",
+        "bash, zsh, fish или nushell: оболочка — тоже строка в конфигурации, у каждого пользователя своя." },
+      "programs.fish.enable = true;\nusers.users.<you>.shell = pkgs.fish;", "shell-fish" },
+    { { "Network", "Сеть" }, { "Wi-Fi from the terminal", "Wi-Fi из терминала" },
+      { "NetworkManager is on; nmtui finds the networks and asks for the password. Desktops show it in their panels as well. The connection made in this installer is already there.",
+        "NetworkManager включён; nmtui находит сети и спрашивает пароль. Рабочие столы показывают сеть и на своих панелях. Подключение, сделанное в установщике, уже там." },
+      "nmtui", NULL },
+    { { "Flakes", "Флейки" }, { "Flakes work, with your own nixpkgs", "Флейки работают, со своими nixpkgs" },
+      { "nixith builds nixithConfigurations.<host> (or nixosConfigurations.<host>) of a flake as readily as configuration.nix.",
+        "nixith собирает nixithConfigurations.<хост> (или nixosConfigurations.<хост>) из флейка так же легко, как configuration.nix." },
+      "sudo nixith switch --flake /etc/nixith#box", NULL },
+    { { "Housekeeping", "Уборка" }, { "Free the disk of old generations", "Освободить диск от старых поколений" },
+      { "Old generations keep their packages in the store until you collect them; the next build tidies the boot menu.",
+        "Старые поколения держат свои пакеты в хранилище, пока их не соберут; следующая сборка приведёт в порядок меню загрузки." },
+      "sudo nix-collect-garbage -d\nsudo nixith boot", NULL },
+    { { "Almost there", "Почти готово" }, { "When it is done", "Когда всё закончится" },
+      { "Remove the installation medium and restart. The boot menu will show NixithOS; your configuration is waiting in /etc/nixith.",
+        "Извлеките установочный носитель и перезагрузитесь. В меню загрузки будет NixithOS; ваша конфигурация ждёт в /etc/nixith." },
+      "nixith parts      # what the system was built from", NULL },
+};
+#define NTIPS (int)(sizeof tips / sizeof *tips)
+
+/* a slide from row y to row bottom: the tip, and its screenshot beside it */
+static void draw_tip(int i, int y, int bottom)
+{
+    const struct tip *t = &tips[i];
+    if (t->img)
+        pic_right(t->img, y, 50, bottom - y + 1);
+    char pos[16];
+    snprintf(pos, sizeof pos, "%d / %d", i + 1, NTIPS);
+    attron(COLOR_PAIR(C_DIM) | A_BOLD);
+    put(y, CX, t->kicker[ru], CW - 8);
+    put(y, CX + CW - dwidth(pos), pos, dwidth(pos));
+    attroff(COLOR_PAIR(C_DIM) | A_BOLD);
+    y += 2;
+    attron(A_BOLD);
+    y = wrap(y, CX, CW, bottom, t->title[ru]);
+    attroff(A_BOLD);
+    y = wrap(y + 1, CX, CW, bottom, t->body[ru]);
+    if (t->cmd && y + 1 <= bottom) {
+        /* the command, as in a terminal: a bar on its left */
+        char line[256];
+        y++;
+        for (const char *p = t->cmd; *p && y <= bottom;) {
+            int n = strcspn(p, "\n");
+            snprintf(line, sizeof line, "%.*s", n, p);
+            attron(COLOR_PAIR(C_DIM) | A_BOLD);
+            mvaddch(y, CX, ACS_VLINE);
+            attroff(COLOR_PAIR(C_DIM) | A_BOLD);
+            attron(A_BOLD);
+            put(y++, CX + 2, line, CW - 2);
+            attroff(A_BOLD);
+            p += n + (p[n] == '\n');
+        }
+    }
 }
 
 static int step_install(void)
@@ -1884,7 +2938,9 @@ static int step_install(void)
     fcntl(fd[0], F_SETFL, O_NONBLOCK);
     int stage = 0, done = 0, failed = 0, spin = 0, eof = 0, drawn_final = 0;
     char failmsg[512] = "", part[4096] = "";
-    time_t t0 = time(NULL);
+    time_t t0 = time(NULL), tip_t = t0;
+    int tip = 0, show_log = 0;
+    nodelay(stdscr, TRUE);
     for (;;) {
         /* read what came */
         struct pollfd p = { fd[0], POLLIN, 0 };
@@ -1917,10 +2973,26 @@ static int step_install(void)
                 }
             }
         }
+        /* the keys: the slides back and forth, the whole log; a slide goes
+         * on by itself after 11 seconds, as in Calamares */
+        wint_t c;
+        int kr;
+        while ((kr = get_wch(&c)) != ERR) {
+            if (kr == KEY_CODE_YES && (c == KEY_RIGHT || c == KEY_LEFT)) {
+                tip = (tip + (c == KEY_RIGHT ? 1 : NTIPS - 1)) % NTIPS;
+                tip_t = time(NULL);
+            } else if (kr == OK && (c == '\t' || c == 'l' || c == 'L')) {
+                show_log = !show_log;
+            }
+        }
+        if (time(NULL) - tip_t >= 11) {
+            tip = (tip + 1) % NTIPS;
+            tip_t = time(NULL);
+        }
         /* draw */
         chrome(done || failed ? ""
-                              : T("The installation is running; please do not turn the computer off.",
-                                  "Идёт установка; не выключайте компьютер."));
+                              : T("←→ slides   Tab: the log   Please do not turn the computer off while it installs.",
+                                  "←→ слайды   Tab: журнал   Не выключайте компьютер, пока идёт установка."));
         int y = CY;
         title(&y, done ? T("NixithOS is installed", "NixithOS установлена")
                        : failed ? T("The installation failed", "Установка не удалась")
@@ -1961,15 +3033,26 @@ static int step_install(void)
         mvhline(y++, CX, ACS_HLINE, CW);
         attroff(COLOR_PAIR(C_DIM) | A_BOLD);
         int rows = CY + CH - y - (done || failed ? 2 : 0);
+        if (!show_log && !done && !failed && rows >= 10) {
+            /* a slide, and under it the last lines of the log */
+            int tail = rows >= 18 ? 3 : 1, cw = CW;
+            draw_tip(tip, y + 1, y + rows - tail - 3);
+            CW = cw;
+            attron(COLOR_PAIR(C_DIM) | A_BOLD);
+            mvhline(y + rows - tail - 1, CX, ACS_HLINE, CW);
+            attroff(COLOR_PAIR(C_DIM) | A_BOLD);
+            y += rows - tail;
+            rows = tail;
+        }
         for (int i = 0; i < rows; i++) {
             int li = nlog - rows + i;
             if (li < 0)
                 continue;
             attron(COLOR_PAIR(C_DIM) | A_BOLD);
-            put(y + i, CX, logl[li], CW);
+            put(y + i, CX, loglines[li], CW);
             attroff(COLOR_PAIR(C_DIM) | A_BOLD);
         }
-        refresh();
+        present();
         spin++;
         if (eof && drawn_final)
             break;
@@ -1984,6 +3067,7 @@ static int step_install(void)
             drawn_final = 1; /* once more, with the result */
         }
     }
+    nodelay(stdscr, FALSE);
     close(fd[0]);
     if (logf)
         fclose(logf);
@@ -2046,6 +3130,7 @@ int main(int argc, char **argv)
     }
     S.efi = access("/sys/firmware/efi", F_OK) == 0;
     load_art();
+    pic_init();
 
     setenv("ESCDELAY", "25", 1);
     initscr();
@@ -2053,6 +3138,9 @@ int main(int argc, char **argv)
     noecho();
     keypad(stdscr, TRUE);
     curs_set(0);
+    /* (no shifting of characters along a line: that would shift a part of a
+     * picture on the framebuffer with them) */
+    idcok(stdscr, FALSE);
     if (has_colors()) {
         start_color();
         use_default_colors();
@@ -2062,6 +3150,9 @@ int main(int argc, char **argv)
         init_pair(C_ERR, COLOR_RED, -1);
         init_pair(C_OK, COLOR_GREEN, -1);
         init_pair(C_HEAD, COLOR_BLACK, COLOR_WHITE);
+        init_pair(C_PIC, COLOR_BLACK, COLOR_BLACK);
+    } else {
+        pic_mode = PIC_NONE; /* (no colour pair of its own to keep the cells) */
     }
     bkgd(COLOR_PAIR(C_NORMAL));
 
