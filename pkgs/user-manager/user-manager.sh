@@ -196,9 +196,15 @@ start_lingering() {
     [[ -d $(manager_dir "$uid") ]] && continue
     # (one that is being taken down is not to come back)
     [[ -e $SESSIONS/$uid.stopping ]] && continue
-    if [[ ! -d /run/user/$uid ]]; then
-      # the login manager makes it for a lingering user too, but it may not be up yet
+    # The login manager makes it for a lingering user too, but it may not be
+    # up yet.  Made here, it is a tmpfs as elogind makes it: a plain directory
+    # got elogind's tmpfs mounted over it at the login, and the sockets and
+    # the bus the services had made there went under it — the sound was gone
+    # from the first login after every boot.  A mount point elogind leaves.
+    if ! mountpoint -q "/run/user/$uid"; then
       install -d -m 0700 -o "$uid" -g "$(id -g "$name")" "/run/user/$uid" 2> /dev/null || continue
+      mount -t tmpfs -o "mode=0700,uid=$uid,gid=$(id -g "$name"),size=10%,nosuid,nodev" \
+        tmpfs "/run/user/$uid" || continue
     fi
     start_manager "$uid"
   done
