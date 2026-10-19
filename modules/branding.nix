@@ -52,17 +52,30 @@ let
     logo = {
       type = "file";
       source = "/etc/nixithos/logo-fastfetch.txt";
-      # the lines of the mark, and its axes in a dimmer colour
+      # All of it light, nothing grey: ANSI 97, the palette's bright white.
+      # (fastfetch's "white" and "bright_white" are 37 and 1;37, the palette's
+      # white, which many themes make grey — Gruvbox's #a89984.)
       color = {
-        "1" = "white";
-        "2" = "bright_black";
+        "1" = "97";
+        "2" = "97";
       };
       padding = {
         top = 1;
         right = 3;
       };
     };
-    display.color.keys = "white";
+    display.color = {
+      keys = "97";
+      title = "97";
+      output = "97";
+      separator = "97";
+    };
+    # (memory and disk percentages are green, yellow and red otherwise)
+    display.percent.color = {
+      green = "97";
+      yellow = "97";
+      red = "97";
+    };
     # (a configuration file replaces fastfetch's list of modules, so this is
     # that list as fastfetch has it)
     modules = [
@@ -93,8 +106,7 @@ let
       "battery"
       "poweradapter"
       "locale"
-      "break"
-      "colors"
+      # (no "colors": its blocks are the palette, black and grey among them)
     ];
   };
 in
