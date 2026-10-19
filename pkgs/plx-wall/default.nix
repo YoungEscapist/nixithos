@@ -26,7 +26,7 @@ rustPlatform.buildRustPackage {
   src = fetchFromGitHub {
     owner = "YoungEscapist";
     repo = "plx-wall";
-    rev = "a15536a789a9fffd94b93d8183f05a7f1d680177"; # рабочее дерево /root/plx-wall-nixith 19.10 (GBM-dmabuf), не запушено
+    rev = "61cc7ecf5ca23c50e9ca02f4a4336ab68800f161"; # ветка nixith-20261018: живые обои через GBM-dmabuf
     hash = "sha256-yYk55mQi2old1lHhZBauW1MSmwLuwISHNc3LLoKry0M=";
   };
 

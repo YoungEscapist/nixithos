@@ -43,8 +43,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
   src = fetchFromGitHub {
     owner = "YoungEscapist";
     repo = "parallax-wm";
-    rev = "155bbb148a06e4c75b5a5a8fc50bf1e84c81fa40"; # рабочее дерево /root/parallax-nixith 19.10 (cycle, dmabuf), не запушено
-    hash = "sha256-YMbb+kBPIiVGuIVxIgEBIeADoDN661dsWFjsJ07Kxd4=";
+    rev = "723d16decc55e2bedca8f5fa44f73ae09e346a54"; # ветка nixith-20261018: обои плиткой, cycle в сеансе, blur_radius
+    hash = "sha256-GPb3JWZ0K3JmVNbdmX8i7/XatfblTaiVaHeiHpmTzew=";
   };
 
   cargoHash = "sha256-QbbQI84MnObdbDjqkzY3cfJkIelhP1Ihvc3AE5q4mmY=";
