@@ -27,10 +27,27 @@ let
   cfg = config.nixithos.desktop;
   dmcfg = config.services.displayManager;
 
+  # The display manager reads these once, when it starts, and a switch does
+  # not restart it (that would end the session running under it): with the
+  # store path of the program in Exec=, every login after a switch still ran
+  # the compositor of the generation the display manager started in. So a
+  # program that is the same one in the system's path is run from there,
+  # /run/current-system/sw/bin: the generation of the moment of the login.
   waylandSessions = pkgs.runCommand "wayland-sessions" { preferLocalBuild = true; } ''
     mkdir -p $out/share/wayland-sessions
     for f in ${config.services.displayManager.sessionData.desktops}/share/wayland-sessions/*.desktop; do
-      grep -qE '^Exec=.*uwsm' "$f" || ln -s "$f" $out/share/wayland-sessions/
+      grep -qE '^Exec=.*uwsm' "$f" && continue
+      d=$out/share/wayland-sessions/$(basename "$f")
+      cp "$f" "$d"
+      chmod u+w "$d"
+      for key in Exec TryExec; do
+        prog=$(sed -n "s/^$key=\([^ ]*\).*/\1/p" "$d" | head -n1)
+        case $prog in /nix/store/*/bin/*) ;; *) continue ;; esac
+        name=''${prog##*/}
+        if [ "$(readlink -f ${config.system.path}/bin/$name)" = "$(readlink -f "$prog")" ]; then
+          sed -i "s|^$key=$prog|$key=/run/current-system/sw/bin/$name|" "$d"
+        fi
+      done
     done
   '';
 
