@@ -41,7 +41,9 @@ let
     name = "parallax-autostart";
     runtimeInputs = with pkgs; [
       coreutils
+      findutils
       gnugrep
+      gnused
       dbus
       wl-clipboard
       cliphist
@@ -215,6 +217,8 @@ in
         plx-wall
         plx-launcher
         pkgs.rofi
+        # its terminal (Super+Return in its configuration), and foot
+        pkgs.ghostty
         pkgs.foot
         pkgs.fuzzel
         pkgs.wl-clipboard
@@ -225,11 +229,72 @@ in
         pkgs.slurp
         pkgs.pavucontrol
         pkgs.brightnessctl
-        # its cursor: the default of its configuration, Bibata-Modern-Ice
-        # (without the theme the pointer is invisible)
+        # the pointer: Bibata-Modern-Ice, and Adwaita, which the compositor
+        # falls back to (with neither found, the pointer is invisible); and
+        # the icons of the applications in the launchers and in the bar
         pkgs.bibata-cursors
+        pkgs.adwaita-icon-theme
+        pkgs.hicolor-icon-theme
       ];
+      # The compositor and Xwayland take the pointer's theme from
+      # XCURSOR_THEME; without it they look for "default", which nothing
+      # provided.  GTK under Wayland reads it from its settings instead.
+      environment.sessionVariables = {
+        XCURSOR_THEME = lib.mkDefault "Bibata-Modern-Ice";
+        XCURSOR_SIZE = lib.mkDefault "24";
+      };
+      xdg.icons.fallbackCursorThemes = lib.mkDefault [ "Bibata-Modern-Ice" ];
+      programs.dconf = {
+        enable = true;
+        profiles.user.databases = [
+          {
+            settings."org/gnome/desktop/interface" = {
+              cursor-theme = "Bibata-Modern-Ice";
+              cursor-size = lib.gvariant.mkInt32 24;
+              icon-theme = "Adwaita";
+              color-scheme = "prefer-dark";
+            };
+          }
+        ];
+      };
+      # the wallpapers a new user starts with (../../pkgs/parallax/autostart.sh
+      # reads this): out of the system's, NixithOS's mark first when its look
+      # is on
+      environment.pathsToLink = [ "/share/backgrounds" ];
+      environment.etc."parallax/session.env".text = ''
+        PLX_SYSTEM_WALLPAPERS=/run/current-system/sw/share/backgrounds
+        PLX_DEFAULT_WALLPAPER=${lib.optionalString config.nixithos.theme.enable "/run/current-system/sw/share/backgrounds/nixithos/nixithos.png"}
+      '';
+      # its Wi-Fi menu talks to NetworkManager over the system bus
+      networking.networkmanager.enable = lib.mkDefault true;
+      # the backlight of the screen and of the keyboard, which the compositor
+      # writes into /sys itself: brightnessctl's rules let the group video
+      services.udev.packages = [ pkgs.brightnessctl ];
+      # the modes of its power menu, and the charge
+      services.power-profiles-daemon.enable = lib.mkDefault true;
+      services.upower.enable = lib.mkDefault true;
       services.dbus.packages = [ pkgs.mako ];
+      # what a new user's notifications start from (autostart.sh copies it):
+      # below the bar, not over it, in the greys of the bar
+      environment.etc."xdg/mako/config".text = ''
+        anchor=top-right
+        margin=56,16,0,0
+        layer=overlay
+        width=360
+        padding=12
+        border-size=1
+        border-radius=10
+        background-color=#141416e6
+        text-color=#e8e8ea
+        border-color=#3a3a3e
+        progress-color=over #5a5a60
+        font=sans 11
+        default-timeout=6000
+
+        [urgency=critical]
+        border-color=#c88a8a
+        default-timeout=0
+      '';
       # the icons of its bar and dock, and its glyphs
       fonts.packages = [ pkgs.nerd-fonts.jetbrains-mono ];
       services.displayManager.sessionPackages = [ parallax ];

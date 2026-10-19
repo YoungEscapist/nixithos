@@ -99,9 +99,20 @@ rustPlatform.buildRustPackage (finalAttrs: {
     substituteInPlace $out/bin/plx-host --replace-fail '#!/usr/bin/env python3' '#!${python3.interpreter}'
   ''
   + lib.optionalString (autostart != null) ''
-    # (exec keeps the pid: the compositor's is ours)
+    # (exec keeps the pid: the compositor's is ours; --prepare first, so
+    # that a new user's configuration is there before the compositor reads it)
+    # The session's log (the compositor's and the programs it starts), with
+    # the previous session's beside it: a display manager keeps none.
     substituteInPlace $out/bin/parallax-session \
-      --replace-fail 'exec "$PLX_BINARY" "$@"' '${autostart} $$ &
+      --replace-fail 'exec "$PLX_BINARY" "$@"' 'logdir=''${XDG_STATE_HOME:-$HOME/.local/state}/parallax
+    if mkdir -p "$logdir"; then
+        [ -f "$logdir/session.log" ] && mv -f "$logdir/session.log" "$logdir/session.log.old"
+        exec >"$logdir/session.log" 2>&1
+    fi
+    # (warnings and errors: the missing theme of the pointer, a failed device)
+    export RUST_LOG=''${RUST_LOG:-warn}
+    ${autostart} --prepare '"$out"'/share/parallax
+    ${autostart} $$ &
     exec "$PLX_BINARY" "$@"'
   '';
 
