@@ -391,12 +391,35 @@ cmd_session() {
   s6-rc-init -c "$st/db/compiled-boot" -l "$st/s6-rc" "$scandir" \
     || { log "s6-rc-init failed"; stop_all; exit 1; }
   s6-rc -l "$st/s6-rc" -v1 -u change default
+  adopt_strays "$st"
   s6-rc-update -l "$st/s6-rc" -v1 "$st/db/compiled"
   rm -f "$st/units/.booting"
   # (what a login waits for: see cmd_hook)
   : > "$st/units/.up"
 
   wait "$svpid"
+}
+
+# Services up behind s6-rc's back: what a socket brought up while the login's
+# transaction held the lock was started with s6-svc -u (see systemctl's
+# start), and s6-rc counts it down.  s6-rc-update would then replace its
+# service directory, supervisor and program with it, whenever its run script
+# changed (it names the database: at every switch) — pipewire went that way,
+# and the sound with it.  So they are adopted first, as rc.init does for the
+# system's.
+adopt_strays() {
+  local st=$1 up known d a adopt=()
+  up=" $(s6-rc -l "$st/s6-rc" -b -a list 2>/dev/null | tr '\n' ' ') "
+  known=" $(s6-rc-db -l "$st/s6-rc" list services 2>/dev/null | tr '\n' ' ') "
+  for d in "$st"/service/*; do
+    a=${d##*/}
+    [[ $known == *" $a "* && $up != *" $a "* ]] || continue
+    [[ $(s6-svstat -o up "$d" 2>/dev/null) == true ]] && adopt+=("$a")
+  done
+  if (( ${#adopt[@]} )); then
+    log "services started behind s6-rc: ${adopt[*]}"
+    s6-rc -l "$st/s6-rc" -b -u change "${adopt[@]}" > /dev/null 2>&1
+  fi
 }
 
 # --------------------------------------------------------------------------
@@ -414,21 +437,34 @@ cmd_user_switch() {
   if [[ -n $old && $old != "$new" && -r $old/switch.tsv && -r $new/switch.tsv ]]; then
     local -A old_hash=() new_exists=()
     while IFS=$'\t' read -r unit hash restart reload stop atoms; do old_hash[$unit]=$hash; done < "$old/switch.tsv"
-    local conv=$st/conversion.$$ n=$st/db/compiled.$$ up
+    local conv=$st/conversion.$$ n=$st/db/compiled.$$ up reloads=()
     : > "$conv"
     up=" $(s6-rc -l "$st/s6-rc" -b -a list 2>/dev/null | tr '\n' ' ') "
     while IFS=$'\t' read -r unit hash restart reload stop atoms; do
       [[ -n ${old_hash[$unit]-} && ${old_hash[$unit]} != "$hash" ]] || continue
       [[ $restart == 1 ]] || continue
       case $unit in *.target|*.device) continue ;; esac
+      # reloadIfChanged, as the system's switch does: a restart of dbus took
+      # pipewire, which needs it, along — and the sound of a call with it
+      if [[ $reload == 1 ]]; then
+        [[ $up == *" ${atoms%% *} "* ]] && reloads+=("$unit")
+        continue
+      fi
       for atom in $atoms; do
         [[ $up == *" $atom "* ]] && printf '"%s" restart\n' "$atom" >> "$conv"
       done
     done < "$new/switch.tsv"
+    adopt_strays "$st"
     cp -r --no-preserve=ownership "$new/compiled" "$n" && chmod -R u+w "$n" \
       || { log "cannot copy the new user database"; rm -f "$conv"; exit 1; }
     s6-rc-update -l "$st/s6-rc" -b -f "$conv" "$n" > /dev/null 2>&1 \
       || log "s6-rc-update of the user's services did not complete"
+    # (the copies of earlier switches: one was left behind at each)
+    local cur d
+    cur=$(readlink "$st/s6-rc/compiled")
+    for d in "$st"/db/compiled.*; do
+      [[ $d == "$cur" ]] || { chmod -R u+w "$d"; rm -rf "$d"; }
+    done
     # what `systemctl --user` reads next to the compiled databases
     local f
     for f in "$new"/*.tsv "$new"/manifest.json "$new"/unit-data "$new"/units; do
@@ -436,6 +472,10 @@ cmd_user_switch() {
     done
     rm -f "$conv"
     s6-rc -l "$st/s6-rc" -b -u change default > /dev/null 2>&1
+    for unit in ${reloads[@]+"${reloads[@]}"}; do
+      PATH=$PATH:$DEFAULT_PATH systemctl --user reload "$unit" > /dev/null 2>&1 \
+        || log "reload of $unit failed"
+    done
   fi
   # the activation scripts of the user run at every switch
   PATH=$PATH:$DEFAULT_PATH systemctl --user restart nixos-activation.service > /dev/null 2>&1 || true
