@@ -12,6 +12,7 @@
   libxkbcommon,
   ffmpeg,
   libva,
+  libgbm,
   curl,
   coreutils,
   procps,
@@ -25,8 +26,8 @@ rustPlatform.buildRustPackage {
   src = fetchFromGitHub {
     owner = "YoungEscapist";
     repo = "plx-wall";
-    rev = "23730924d8598b04bb0d99fd60c41b222b4b8d10";
-    hash = "sha256-WAEFegRQ7beKzxFKHo+eJirJ/qn0SvT1Ek30aRO+0p0=";
+    rev = "a15536a789a9fffd94b93d8183f05a7f1d680177"; # рабочее дерево /root/plx-wall-nixith 19.10 (GBM-dmabuf), не запушено
+    hash = "sha256-yYk55mQi2old1lHhZBauW1MSmwLuwISHNc3LLoKry0M=";
   };
 
   cargoHash = "sha256-GHLewEOilCdC32bJ+nFAldkx31TxUmBITsvUVEMtQoQ=";
@@ -44,6 +45,9 @@ rustPlatform.buildRustPackage {
     libxkbcommon
     ffmpeg
     libva
+    # (frames of live wallpapers go to the compositor in linear GBM buffers:
+    # a dmabuf it samples as is, instead of a wl_shm it has to upload)
+    libgbm
   ];
 
   doCheck = false;
