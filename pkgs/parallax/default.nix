@@ -43,8 +43,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
   src = fetchFromGitHub {
     owner = "YoungEscapist";
     repo = "parallax-wm";
-    rev = "723d16decc55e2bedca8f5fa44f73ae09e346a54"; # ветка nixith-20261018: обои плиткой, cycle в сеансе, blur_radius
-    hash = "sha256-GPb3JWZ0K3JmVNbdmX8i7/XatfblTaiVaHeiHpmTzew=";
+    rev = "558721067c0f6e44f7e7465772ba97aa29beeba5"; # ветка nixith-20261018: frame callback'и сразу после кадра
+    hash = "sha256-PVLgQcCOMugc2AGQoqbmJlQjrnm4mFw5PXmk2WtHHoM=";
   };
 
   cargoHash = "sha256-QbbQI84MnObdbDjqkzY3cfJkIelhP1Ihvc3AE5q4mmY=";
