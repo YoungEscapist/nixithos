@@ -299,10 +299,14 @@ logged in on tty1 and **nixith-installer** starts by itself
 
 nixith-installer is a small C program over ncurses (about 100 KB) that
 speaks English or Russian. Its steps are those of the Calamares installer
-below, with a network step in front: a simpler nmtui on top of `nmcli`
-(a cable connects by itself, Wi-Fi is a list and a password; `nixith-net`
-starts that step alone, on any system). Nothing is written until the summary
-is confirmed; then [install.sh](pkgs/nixith-installer/install.sh)
+below, with the same screenshots next to every choice and the same slides
+during the installation (on the Linux console they are drawn straight to the
+framebuffer), and with a network step in front: a simpler nmtui on top of
+`nmcli`. A cable connects by itself; a network is a form, not just a
+password: WPA2, WPA3, WEP or 802.1X with a login, hidden networks, a cable
+with the address, DNS and MAC by hand, DSL / PPPoE. The connection made there
+is copied into the installed system. `nixith-net` starts that step alone, on
+any system. Nothing is written until the summary is confirmed; then [install.sh](pkgs/nixith-installer/install.sh)
 partitions the disk (GPT: a 1 GiB EFI partition, or a BIOS boot partition,
 and ext4 or btrfs for the rest) or takes what is mounted on `/mnt`, writes
 `/etc/nixith/configuration.nix` the way Calamares did, with the passwords as
