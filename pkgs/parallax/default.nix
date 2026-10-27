@@ -38,13 +38,13 @@
 
 rustPlatform.buildRustPackage (finalAttrs: {
   pname = "parallax";
-  version = "0.1.0-unstable-2026-10-18";
+  version = "0.1.0-unstable-2026-10-26";
 
   src = fetchFromGitHub {
     owner = "YoungEscapist";
     repo = "parallax-wm";
-    rev = "558721067c0f6e44f7e7465772ba97aa29beeba5"; # ветка nixith-20261018: frame callback'и сразу после кадра
-    hash = "sha256-PVLgQcCOMugc2AGQoqbmJlQjrnm4mFw5PXmk2WtHHoM=";
+    rev = "a279285eb584fddfc8080318ecab0441333f9d68"; # ветка popups-20261024: окошки панели, виртуальный ввод, window{ above }, виджеты переносятся
+    hash = "sha256-IHOjlLlFJ4CDRCwt4rHeShWxzPRWINou5EdLtCPCzMg=";
   };
 
   cargoHash = "sha256-QbbQI84MnObdbDjqkzY3cfJkIelhP1Ihvc3AE5q4mmY=";

@@ -2,7 +2,7 @@
   description = "NixithOS: NixOS on s6-linux-init and s6-rc instead of systemd";
 
   # nixos-26.05; keep in step with lib/nixpkgs.json
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/7993f34ee47e28a3d607a525aadc6c94b73be728";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/718f670e845328e9c2cecdd832835712b2cbd065";
 
   outputs =
     { self, nixpkgs }:
