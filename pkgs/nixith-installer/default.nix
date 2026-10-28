@@ -21,6 +21,13 @@
   btrfs-progs,
   gnused,
   gnugrep,
+  # the kernels the installer offers: only their versions, for the names
+  linuxPackages,
+  linuxPackages_latest,
+  linuxPackages_6_12,
+  linuxPackages_6_6,
+  linuxPackages_zen,
+  linuxPackages_xanmod_latest,
 }:
 
 stdenv.mkDerivation {
@@ -51,6 +58,12 @@ stdenv.mkDerivation {
     $CC -O2 -Wall -Wno-missing-field-initializers -Wno-format-truncation -Wno-stringop-truncation \
       -DINSTALL_SH=\"$out/libexec/nixith-installer/install.sh\" \
       -DSHOTS=\"$out/share/nixith-installer/screenshots\" \
+      -DK_LTS=\"${linuxPackages.kernel.version}\" \
+      -DK_LATEST=\"${linuxPackages_latest.kernel.version}\" \
+      -DK_6_12=\"${linuxPackages_6_12.kernel.version}\" \
+      -DK_6_6=\"${linuxPackages_6_6.kernel.version}\" \
+      -DK_ZEN=\"${linuxPackages_zen.kernel.version}\" \
+      -DK_XANMOD=\"${linuxPackages_xanmod_latest.kernel.version}\" \
       -I${stb}/include/stb \
       -o nixith-installer installer.c $(pkg-config --cflags --libs ncursesw) -lcrypt -lm
     runHook postBuild

@@ -3,10 +3,11 @@
  *
  * A wizard over ncurses: the steps of the old Calamares installer (time
  * zone, language, keyboard, user, desktop, login, shell, boot loader,
- * unfree software, disk), with a network step in front of them that does
- * what nmtui does, only simpler: the wired network by itself, a list of
- * Wi-Fi networks, and a form for a connection that needs more than a
- * password (802.1X, a hidden network, PPPoE, an address by hand).  Like
+ * unfree software, disk) and the kernel, with a network step in front of
+ * them that does what nmtui does, only simpler: the wired network by
+ * itself, a list of Wi-Fi networks, and a form for a connection that needs
+ * more than a password (802.1X, a hidden network, PPPoE, an address by
+ * hand).  Like
  * Calamares, it shows a screenshot of each desktop, login screen, shell and
  * boot loader, and slides while it installs.  Nothing touches the disk until
  * the summary is confirmed; then ./install.sh does the work (partitioning,
@@ -83,7 +84,7 @@ static struct {
     char fullname[160], user[64], host[64];
     char pw1[128], pw2[128], rpw1[128], rpw2[128];
     int rootsame, autologin, user_edited;
-    int desktop, dm, shell, loader, unfree;
+    int desktop, dm, shell, loader, kernel, unfree;
     char disk[64], disk_desc[200];
     int manual, fs, efi;
 } S = { .rootsame = 1, .host = "nixith" };
@@ -155,6 +156,38 @@ static const struct opt loaders[] = {
 };
 #define NLOADERS (int)(sizeof loaders / sizeof *loaders)
 
+/* id: the kernel's packages in nixpkgs (boot.kernelPackages = pkgs.<id>);
+ * the versions are those of the nixpkgs the image is built of (default.nix) */
+#ifndef K_LTS
+#define K_LTS "6.18"
+#define K_LATEST "7.3"
+#define K_6_12 "6.12"
+#define K_6_6 "6.6"
+#define K_ZEN "7.2"
+#define K_XANMOD "7.2"
+#endif
+static const struct opt kernels[] = {
+    { "linuxPackages", "Linux " K_LTS " LTS",
+      "The long-term kernel NixOS uses by default, and the one this image runs: nothing to download. It gets fixes for years and moves to the next long-term one with a new NixOS release. The safe choice.",
+      "Долгосрочное ядро, которое NixOS ставит по умолчанию; на нём работает этот образ, скачивать ничего не нужно. Исправления получает годами, на следующее долгосрочное переходит с новым выпуском NixOS. Надёжный выбор." },
+    { "linuxPackages_latest", "Linux " K_LATEST,
+      "The newest stable kernel: the newest drivers, for new graphics cards, Wi-Fi chips and laptops. It moves on to each new version as the system is updated.",
+      "Самое новое стабильное ядро: самые свежие драйверы, для новых видеокарт, чипов Wi-Fi и ноутбуков. С обновлениями системы переходит на каждую следующую версию." },
+    { "linuxPackages_6_12", "Linux " K_6_12 " LTS",
+      "The previous long-term kernel, for hardware or drivers that do not get on with the newer ones. Stays on 6.12 until it is changed in the configuration.",
+      "Предыдущее долгосрочное ядро, для железа или драйверов, которым не подходят новые. Остаётся на 6.12, пока его не сменить в конфигурации." },
+    { "linuxPackages_6_6", "Linux " K_6_6 " LTS",
+      "An older long-term kernel, for old hardware. Stays on 6.6 until it is changed in the configuration.",
+      "Более старое долгосрочное ядро, для старого железа. Остаётся на 6.6, пока его не сменить в конфигурации." },
+    { "linuxPackages_zen", "Linux Zen " K_ZEN,
+      "A recent kernel with patches for desktops and games: the system stays responsive under load, at some cost in throughput.",
+      "Свежее ядро с патчами для рабочего стола и игр: система отзывчивее под нагрузкой ценой части пропускной способности." },
+    { "linuxPackages_xanmod_latest", "Linux XanMod " K_XANMOD,
+      "Another recent kernel tuned for desktops and games, with its own set of patches and scheduler settings.",
+      "Ещё одно свежее ядро, настроенное для рабочего стола и игр, со своим набором патчей и настроек планировщика." },
+};
+#define NKERNELS (int)(sizeof kernels / sizeof *kernels)
+
 static const struct opt locales[] = {
     { "en_US.UTF-8", "English (United States)" }, { "en_GB.UTF-8", "English (United Kingdom)" },
     { "ru_RU.UTF-8", "Русский" }, { "uk_UA.UTF-8", "Українська" }, { "be_BY.UTF-8", "Беларуская" },
@@ -196,18 +229,18 @@ static const char *optname(const struct opt *o)
 
 enum {
     ST_WELCOME, ST_GUIDE, ST_NETWORK, ST_TZ, ST_LOCALE, ST_KEYBOARD, ST_USER,
-    ST_DESKTOP, ST_LOGIN, ST_SHELL, ST_LOADER, ST_UNFREE, ST_DISK, ST_SUMMARY,
-    ST_INSTALL, NSTEPS
+    ST_DESKTOP, ST_LOGIN, ST_SHELL, ST_LOADER, ST_KERNEL, ST_UNFREE, ST_DISK,
+    ST_SUMMARY, ST_INSTALL, NSTEPS
 };
 
 static const char *step_name(int i)
 {
     static const char *en[] = { "Welcome", "Guide", "Network", "Time zone", "Language",
-        "Keyboard", "User", "Desktop", "Login", "Shell", "Boot loader", "Software",
-        "Disk", "Summary", "Install" };
+        "Keyboard", "User", "Desktop", "Login", "Shell", "Boot loader", "Kernel",
+        "Software", "Disk", "Summary", "Install" };
     static const char *r[] = { "Приветствие", "Справка", "Сеть", "Часовой пояс", "Язык",
         "Клавиатура", "Пользователь", "Рабочий стол", "Вход", "Оболочка", "Загрузчик",
-        "Программы", "Диск", "Итог", "Установка" };
+        "Ядро", "Программы", "Диск", "Итог", "Установка" };
     return ru ? r[i] : en[i];
 }
 
@@ -1169,7 +1202,7 @@ static int step_guide(void)
             "  Space     tick a box\n"
             "  letters   search in long lists (time zones)\n"
             "  F10       quit\n\n"
-            "Next comes the network: the installation downloads the desktop you choose, so connect to the internet if you can. A cable works by itself; for Wi-Fi pick the network and type its password. A network with a login (802.1X), a hidden one, PPPoE and an address by hand are there too.\n\n"
+            "Next comes the network: the installation downloads the desktop and the kernel you choose, so connect to the internet if you can. A cable works by itself; for Wi-Fi pick the network and type its password. A network with a login (802.1X), a hidden one, PPPoE and an address by hand are there too.\n\n"
             "Need a shell? Alt+F2 opens another console.",
             "Установщик задаёт несколько вопросов, по одному на шаг; список слева показывает, где вы сейчас. На диск ничего не пишется до самого последнего шага, после итога.\n\n"
             "Клавиши:\n"
@@ -1180,7 +1213,7 @@ static int step_guide(void)
             "  Пробел    поставить галочку\n"
             "  буквы     поиск в длинных списках (часовые пояса)\n"
             "  F10       выход\n\n"
-            "Дальше — сеть: установка скачивает выбранный рабочий стол, поэтому подключитесь к интернету, если можете. Кабель работает сам; для Wi-Fi выберите сеть и введите пароль. Там же — сети с логином (802.1X), скрытые сети, PPPoE и адрес вручную.\n\n"
+            "Дальше — сеть: установка скачивает выбранные рабочий стол и ядро, поэтому подключитесь к интернету, если можете. Кабель работает сам; для Wi-Fi выберите сеть и введите пароль. Там же — сети с логином (802.1X), скрытые сети, PPPoE и адрес вручную.\n\n"
             "Нужна консоль? Alt+F2 открывает ещё одну."));
         present();
         wint_t c;
@@ -2405,7 +2438,7 @@ static int step_user(void)
     }
 }
 
-/* --- 8.-12. desktop, login, shell, boot loader, software -------------------- */
+/* --- 8.-13. desktop, login, shell, boot loader, kernel, software ------------ */
 
 static const struct opt *desc_table;
 
@@ -2484,6 +2517,16 @@ static int step_loader(void)
                   loaders, NLOADERS, &S.loader);
 }
 
+static int step_kernel(void)
+{
+    char intro[400];
+    snprintf(intro, sizeof intro,
+             T("The Linux kernel the system runs. Linux %s is on this image; the others are downloaded during the installation. It can be changed later: boot.kernelPackages in /etc/nixith/configuration.nix.",
+               "Ядро Linux, на котором работает система. Linux %s есть на этом образе, остальные скачиваются во время установки. Сменить его можно и потом: boot.kernelPackages в /etc/nixith/configuration.nix."),
+             K_LTS);
+    return choose(T("Kernel", "Ядро"), intro, kernels, NKERNELS, &S.kernel);
+}
+
 static int step_unfree(void)
 {
     static const struct opt sw[] = {
@@ -2507,7 +2550,7 @@ static int step_unfree(void)
     return run_menu(&m, &S.unfree);
 }
 
-/* --- 13. disk ---------------------------------------------------------------- */
+/* --- 14. disk ---------------------------------------------------------------- */
 
 struct disk {
     char dev[64], label[200], desc[200];
@@ -2666,7 +2709,7 @@ static int step_disk(void)
     }
 }
 
-/* --- 14. summary ------------------------------------------------------------- */
+/* --- 15. summary ------------------------------------------------------------- */
 
 static int step_summary(void)
 {
@@ -2674,7 +2717,7 @@ static int step_summary(void)
         chrome(T("Enter: install   Esc: back   F10: quit", "Enter: установить   Esc: назад   F10: выход"));
         int y = CY;
         title(&y, T("Everything is ready", "Всё готово"));
-        struct { const char *k; char v[256]; } rows[12];
+        struct { const char *k; char v[256]; } rows[16];
         int n = 0;
 #define ROW(key, ...) do { rows[n].k = key; snprintf(rows[n].v, sizeof rows[n].v, __VA_ARGS__); n++; } while (0)
         char names[200] = "";
@@ -2693,6 +2736,7 @@ static int step_summary(void)
             ROW(T("Login", "Вход"), "%s", optname(&dms[S.dm]));
         ROW(T("Shell", "Оболочка"), "%s", shells[S.shell].name);
         ROW(T("Boot loader", "Загрузчик"), "%s", S.efi ? loaders[S.loader].name : "GRUB (BIOS)");
+        ROW(T("Kernel", "Ядро"), "%s", kernels[S.kernel].name);
         ROW(T("Software", "Программы"), "%s", S.unfree ? T("unfree allowed", "несвободные разрешены") : T("only free", "только свободные"));
         if (S.manual)
             ROW(T("Disk", "Диск"), "%s", T("mounted on /mnt by hand", "смонтирован в /mnt вручную"));
@@ -2738,7 +2782,7 @@ static int step_summary(void)
     }
 }
 
-/* --- 15. install ------------------------------------------------------------- */
+/* --- 16. install ------------------------------------------------------------- */
 
 static void hash(const char *pw, char *out, int size)
 {
@@ -2777,6 +2821,7 @@ static void setenv_choices(void)
     setenv("NI_DM", dms[S.dm].id, 1);
     setenv("NI_SHELL", shells[S.shell].id, 1);
     setenv("NI_LOADER", loaders[S.loader].id, 1);
+    setenv("NI_KERNEL", kernels[S.kernel].id, 1);
     setenv("NI_UNFREE", S.unfree ? "1" : "0", 1);
     char files[4096];
     kept_files(files, sizeof files);
@@ -3163,8 +3208,8 @@ int main(int argc, char **argv)
 
     int (*steps[NSTEPS])(void) = {
         step_welcome, step_guide, step_network, step_tz, step_locale, step_keyboard, step_user,
-        step_desktop, step_login, step_shell, step_loader, step_unfree, step_disk, step_summary,
-        step_install,
+        step_desktop, step_login, step_shell, step_loader, step_kernel, step_unfree, step_disk,
+        step_summary, step_install,
     };
     for (cur_step = 0; cur_step < NSTEPS;) {
         int r = steps[cur_step]();

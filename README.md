@@ -306,7 +306,10 @@ framebuffer), and with a network step in front: a simpler nmtui on top of
 password: WPA2, WPA3, WEP or 802.1X with a login, hidden networks, a cable
 with the address, DNS and MAC by hand, DSL / PPPoE. The connection made there
 is copied into the installed system. `nixith-net` starts that step alone, on
-any system. Nothing is written until the summary is confirmed; then [install.sh](pkgs/nixith-installer/install.sh)
+any system. One step Calamares did not have is the kernel: the long-term one
+NixOS uses by default (it is on the image), the newest, the older long-term
+6.12 or 6.6, Zen or XanMod (`boot.kernelPackages`; all of them come from the
+NixOS cache). Nothing is written until the summary is confirmed; then [install.sh](pkgs/nixith-installer/install.sh)
 partitions the disk (GPT: a 1 GiB EFI partition, or a BIOS boot partition,
 and ext4 or btrfs for the rest) or takes what is mounted on `/mnt`, writes
 `/etc/nixith/configuration.nix` the way Calamares did, with the passwords as

@@ -32,6 +32,7 @@ set -euo pipefail
 : "${NI_DM:=ly}"             # ly | greetd | none
 : "${NI_SHELL:=bash}"        # bash zsh fish nushell
 : "${NI_LOADER:=systemd-boot}"  # systemd-boot limine grub refind (UEFI)
+: "${NI_KERNEL:=linuxPackages}"  # pkgs.<this>: linuxPackages_latest, _zen...
 : "${NI_UNFREE:=0}"
 : "${NI_NM_KEEP:=}"          # NetworkManager profiles to keep, a file a line
 : "${NI_DRY:=0}"
@@ -46,6 +47,12 @@ run() {
     echo "\$ $*"
     if [ "$NI_DRY" != 1 ]; then "$@"; fi
 }
+
+# (goes into configuration.nix as it is)
+case $NI_KERNEL in
+    linuxPackages | linuxPackages_[a-z0-9_]*) ;;
+    *) fail "NI_KERNEL: $NI_KERNEL is not a kernel of nixpkgs" ;;
+esac
 
 # a Nix string
 nix() {
@@ -130,6 +137,19 @@ EOF
 EOF
                 ;;
         esac
+    fi
+    if [ "$NI_KERNEL" = linuxPackages ]; then
+        cat << 'EOF'
+  # The kernel: the long-term one NixOS uses by default.  Another one, e.g.
+  # the newest: boot.kernelPackages = pkgs.linuxPackages_latest;
+
+EOF
+    else
+        cat << EOF
+  # The kernel.
+  boot.kernelPackages = pkgs.$NI_KERNEL;
+
+EOF
     fi
     cat << EOF
   networking.hostName = $(nix "$NI_HOST");
