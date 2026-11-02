@@ -440,7 +440,17 @@ unit_timeout() {
 # unit requires comes up with it); when it has it started already, its
 # processes are started again, as direct_start does under s6.
 dinit_start() {
-  local u=$1 atom=${I_ATOM[$1]} rc=0
+  local u=$1 atom=${I_ATOM[$1]} rc=0 a
+  # (the unit's other atoms too: a socket's activator, its accepting loop -
+  # nothing requires those; its logger comes with it)
+  for a in ${I_ATOMS[$u]}; do
+    [[ $a == "$atom" || $a == *-log ]] && continue
+    if ! is_rc_up "$a"; then
+      dname "$a"
+      "${DINITCTL[@]}" --quiet start "$DN" || rc=1
+      rc_up+="$DN "
+    fi
+  done
   if ! is_rc_up "$atom"; then
     dname "$atom"
     "${DINITCTL[@]}" --quiet start "$DN" || rc=1

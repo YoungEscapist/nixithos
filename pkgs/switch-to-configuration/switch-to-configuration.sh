@@ -343,10 +343,14 @@ rm -f "$conv"
 # 4. start what is new (in the order ranks give), reload what asked for it
 
 if [[ $running_init == dinit ]]; then
-  # (each with what it requires, in the order of their ranks)
+  # (each with what it requires, in the order of their ranks; all of a unit's
+  # atoms: a socket's activator and the like are not required by it)
   while read -r _ unit; do
-    dname "${NEW_ATOMS[$unit]%% *}"
-    "${DINITCTL[@]}" --quiet start "$DN" || rc=4
+    for atom in ${NEW_ATOMS[$unit]}; do
+      [[ $atom == *-log ]] && continue
+      dname "$atom"
+      "${DINITCTL[@]}" --quiet start "$DN" || rc=4
+    done
   done < <(for unit in ${start[@]+"${start[@]}"} ${stop_start[@]+"${stop_start[@]}"}; do
              printf '%s %s\n' "${NEW_UNIT_RANK[$unit]}" "$unit"
            done | sort -n)
