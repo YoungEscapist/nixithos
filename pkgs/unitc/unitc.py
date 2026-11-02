@@ -1954,7 +1954,10 @@ def emit_units(args, ctx, em):
                 a["d"].update({
                     "type": "process",
                     "command": em.dsv(u.atom, "run", name, *opts),
-                    "ready-notification": "pipefd:%d" % args.notification_fd,
+                    # (not pipefd:N: dinit 0.22 loses descriptor N in the
+                    # child when the write end of the service's log pipe
+                    # has that number in dinit; see unit-supervise)
+                    "ready-notification": "pipevar:UNIT_SV_READY_FD",
                     "start-timeout": dsec(start_ms),
                     # (it gives up on the process itself; this is for a
                     # supervisor that does not come back)
