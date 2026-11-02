@@ -1,4 +1,5 @@
-# One s6 supervision tree per logged-in user; see user-manager.sh.
+# One service manager per logged-in user (an s6 tree, or dinit --user); see
+# user-manager.sh.
 {
   lib,
   replaceVarsWith,
@@ -7,8 +8,10 @@
   util-linux,
   getent,
   gnugrep,
+  diffutils,
   s6,
   s6-rc,
+  dinit,
   nixithos,
 }:
 
@@ -25,12 +28,18 @@ replaceVarsWith {
       util-linux
       getent
       gnugrep
+      # (cmp, for a switch of dinit --user)
+      diffutils
       s6
       s6-rc
       # (unit-pam)
       nixithos.unitTools
     ];
     defaultPath = "/run/wrappers/bin:/run/current-system/sw/bin";
+    # (by their paths, not dinit's bin/ in PATH: its shutdown, halt and
+    # reboot would come before the shim's for whatever runs from here)
+    dinit = "${dinit}/bin/dinit";
+    dinitctl = "${dinit}/bin/dinitctl";
   };
 
   postInstall = ''
@@ -38,7 +47,7 @@ replaceVarsWith {
   '';
 
   meta = {
-    description = "Per-user s6 service managers, started by PAM";
+    description = "Per-user service managers (s6 or dinit), started by PAM";
     mainProgram = "user-manager";
     platforms = lib.platforms.linux;
   };

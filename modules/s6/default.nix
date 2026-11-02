@@ -10,7 +10,8 @@
 # With nixithos.init = "dinit" (../dinit) the database holds dinit's service
 # descriptions instead, and what is here about s6-linux-init is left out; the
 # rest (the runtime, the options of logging and native services, the fd
-# holder, the services of users, which keep their s6 trees) is shared.
+# holder) is shared.  The services of users follow: their managers are
+# dinit --user then, on descriptions from the same units.
 {
   config,
   lib,
@@ -227,6 +228,56 @@ let
         ln -s "$units" "$out/units"
       '';
 
+  # (dinit) where a user's manager has the database it runs on: a link that
+  # user-manager puts in the manager's own directory (UNIT_USER_STATE, which
+  # differs from one user to the next), and moves at a switch.  The database
+  # is the same for every user, so the path cannot be written into it as the
+  # system's is; dinit fills the variable in when it reads a description
+  # (dinit-service(5), VARIABLE SUBSTITUTION), and the runtime, which has it
+  # in its environment as every service of the manager does, when it reads
+  # the unit data.  A description stays the same from one configuration to
+  # the next as long as its unit does, which is what the switch compares;
+  # and a manager whose switch did not happen (or failed) goes on with the
+  # database it was started on, whatever the system's is by then.
+  userLive = "\${UNIT_USER_STATE}/db";
+
+  userServices =
+    if isS6 then
+      ''
+        unitc \
+          --scope user \
+          --units "$userUnits" \
+          --out "$out/user" \
+          --runtime ${runtime}/bin/unit-runtime \
+          --bash ${pkgs.runtimeShell} \
+          --fdholder unit-fdholder \
+          --notification-fd ${toString runtime.notificationFd} \
+          --native ${userNativeJSON}
+        s6-rc-compile -v1 "$out/user/compiled-boot" "$out/user/source-boot"
+        s6-rc-compile -v1 "$out/user/compiled" "$out/user/source"
+      ''
+    else
+      ''
+        # dinit --user (see userLive); what has no logger of its own goes
+        # where the manager's output goes, as under s6
+        unitc \
+          --init dinit \
+          --scope user \
+          --units "$userUnits" \
+          --out "$out/user" \
+          --final-out ${lib.escapeShellArg userLive} \
+          --runtime ${lib.escapeShellArg "${userLive}/bin/unit-runtime"} \
+          --supervise ${lib.escapeShellArg "${userLive}/bin/unit-supervise"} \
+          --execlineb ${pkgs.execline}/bin/execlineb \
+          --catchall-console \
+          --bash ${pkgs.runtimeShell} \
+          --fdholder unit-fdholder \
+          --notification-fd ${toString runtime.notificationFd} \
+          --native ${userNativeJSON}
+        mkdir "$out/user/bin"
+        ln -s ${runtime}/bin/unit-runtime ${pkgs.nixithos.unitTools}/bin/unit-supervise "$out/user/bin/"
+      '';
+
   database =
     pkgs.runCommand (if isS6 then "s6-rc-database" else "dinit-database")
       {
@@ -242,19 +293,10 @@ let
       ''
         ${systemServices}
         # The services of users: the same, from systemd.user.*, for the
-        # supervision tree each user gets (../../pkgs/user-manager).
+        # service manager each user gets (../../pkgs/user-manager): an s6
+        # supervision tree, or dinit --user.
         mkdir "$out/user"
-        unitc \
-          --scope user \
-          --units "$userUnits" \
-          --out "$out/user" \
-          --runtime ${runtime}/bin/unit-runtime \
-          --bash ${pkgs.runtimeShell} \
-          --fdholder unit-fdholder \
-          --notification-fd ${toString runtime.notificationFd} \
-          --native ${userNativeJSON}
-        s6-rc-compile -v1 "$out/user/compiled-boot" "$out/user/source-boot"
-        s6-rc-compile -v1 "$out/user/compiled" "$out/user/source"
+        ${userServices}
         ln -s "$userUnits" "$out/user/units"
       '';
 
@@ -635,8 +677,8 @@ in
       ln -s ${database} $out/s6-db
     '';
 
-    # (with dinit too: the loggers, the fd holder and the managers of users
-    # are s6 programs)
+    # (with dinit too: the loggers, the fd holder and the supervisor of the
+    # users' managers are s6 programs)
     environment.systemPackages = [
       pkgs.s6
       pkgs.s6-rc

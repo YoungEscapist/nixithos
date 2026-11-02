@@ -17,7 +17,8 @@
 #   unit-runtime timer      DATA
 #   unit-runtime device-watch DBDIR       start units as devices appear
 #   unit-runtime log        NAME          the per-service logger
-#   unit-runtime booted                   (dinit) the boot is over
+#   unit-runtime booted                   (dinit) the boot is over (of the
+#                                         system, or of a user's manager)
 #
 # Under dinit, the longrun's ./run and ./finish are run by unit-supervise,
 # with the same contract as s6-supervise's (see unit-supervise.c).
@@ -146,6 +147,10 @@ if [[ $scope == user ]]; then
   RT_DIR_LOGS=${XDG_STATE_HOME:-$HOME/.local/state}/log
   RT_DIR_CONF=${XDG_CONFIG_HOME:-$HOME/.config}
   RT_CREDS=$XDG_RUNTIME_DIR/credentials
+  # when each timer went off last (Persistent=): in the user's home, as
+  # systemd has them, and not the stamp of a system timer of the same name
+  # (which a user cannot write either)
+  RT_TIMERS=$RT_DIR_STATE/units/timers
 else
   RT_STATE=/run/units
   RT_CGROUP=/sys/fs/cgroup/units
@@ -158,12 +163,21 @@ else
   RT_DIR_LOGS=/var/log
   RT_DIR_CONF=/etc
   RT_CREDS=/run/credentials
+  RT_TIMERS=/var/lib/units/timers
 fi
 RT_FDHOLDER=$RT_STATE/.fdholder
-# The service manager: s6, or dinit (whose init points /run/units/.db at the
-# unit database; the managers of users are s6 either way).
+# The service manager: s6, or dinit.  dinit's init points /run/units/.db at
+# the unit database; a user's dinit --user has the link in its own directory
+# (UNIT_USER_STATE/db, see user-manager), where a user's s6 has a copy of
+# its compiled databases.  RT_DINITCTL: its control socket.
 RT_INIT=s6
-[[ $scope == system && -L /run/units/.db ]] && RT_INIT=dinit
+if [[ $scope == system ]]; then
+  [[ -L /run/units/.db ]] && RT_INIT=dinit
+  RT_DINITCTL=/run/dinitctl
+else
+  [[ -L ${UNIT_USER_STATE:-$XDG_RUNTIME_DIR}/db ]] && RT_INIT=dinit
+  RT_DINITCTL=${UNIT_USER_STATE:-$XDG_RUNTIME_DIR}/dinitctl
+fi
 RT_CONSOLE=
 if [[ $scope == system && -r /etc/units/console-log ]]; then
   read -r RT_CONSOLE < /etc/units/console-log
@@ -1719,7 +1733,7 @@ cmd_job() {
     # keepalived's boot delay does): the trigger starts it like
     # `systemctl start`, with what it needs; it is not run to completion here.
     if [[ $RT_INIT == dinit ]]; then
-      dinitctl -p /run/dinitctl --quiet start "$(dinit_name "$U_ATOM")" || true
+      dinitctl -p "$RT_DINITCTL" --quiet start "$(dinit_name "$U_ATOM")" || true
       # (started as far as dinit knows, but it ran to completion, failed, or
       # was stopped by hand: its supervisor starts it again)
       if ! rt_up "$U_ATOM" && sv_status "$U_ATOM"; then
@@ -2127,15 +2141,18 @@ cmd_target_up() {
 
 # (dinit) The `boot` service: everything of default.target has been dealt
 # with.  What waited for the end of the boot can go on (getty's Type=idle,
-# units that devices want, systemctl's "starting").
+# units that devices want, systemctl's "starting").  A user's manager is up
+# then, which is what a login waits for (user-manager's hook).
 cmd_booted() {
   rm -f "$RT_STATE/.booting"
+  [[ $scope == user ]] && : > "$RT_STATE/.up"
+  return 0
 }
 
 cmd_timer() {
   load "$1"
-  mkdir -p /var/lib/units/timers
-  exec unit-timer --name "$U_UNIT" --stamp "/var/lib/units/timers/$U_UNIT" \
+  mkdir -p "$RT_TIMERS"
+  exec unit-timer --name "$U_UNIT" --stamp "$RT_TIMERS/$U_UNIT" \
     ${U_TIMER[@]+"${U_TIMER[@]}"} -- "$RT_SELF" job "$U_TIMER_SERVICE_DATA"
 }
 

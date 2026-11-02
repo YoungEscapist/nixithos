@@ -59,7 +59,10 @@ With --init dinit the same graph becomes service descriptions for dinit
 instead (dinit/, one file per service; see emit_dinit), and the two source
 trees are not written: dinit tells ordering (after) from requirement
 (depends-on, waits-for) itself, so one set of descriptions does for the boot
-and for what comes after it.
+and for what comes after it.  The descriptions name everything through
+--final-out, the database of the configuration that runs: for the system a
+path (/run/units/.db), for a user's manager (dinit --user) `${UNIT_USER_STATE}/db`,
+which dinit fills in when it reads them, as bash does in the unit data.
 """
 
 import argparse
@@ -448,13 +451,40 @@ def sh_array(name, values):
 _DINIT_PLAIN = re.compile(r"^[A-Za-z0-9_./:@%+=,-]+$")
 
 
+# A --final-out that names a variable (a user's manager: `${UNIT_USER_STATE}/db`,
+# see main): the one `$` that dinit is to substitute, in commands and paths of
+# the descriptions and in the unit data (out_sq).
+FINAL_OUT_VAR = None
+
+
+def _dq_plain(word):
+    if word == "" or _DINIT_PLAIN.match(word):
+        return word
+    return '"' + word.replace("\\", "\\\\").replace('"', '\\"').replace("$", "$$") + '"'
+
+
 def dq(word):
     """Quote one word of a dinit command line.  `$` would be substituted from
-    the environment when the description is loaded, so it is doubled."""
+    the environment when the description is loaded, so it is doubled - but
+    for the variable --final-out may name, which is there to be."""
     word = str(word)
+    if FINAL_OUT_VAR and FINAL_OUT_VAR in word:
+        parts = word.split(FINAL_OUT_VAR)
+        out = FINAL_OUT_VAR.join(_dq_plain(p) for p in parts)
+        return out if out else '""'
     if _DINIT_PLAIN.match(word):
         return word
     return '"' + word.replace("\\", "\\\\").replace('"', '\\"').replace("$", "$$") + '"'
+
+
+def out_sq(path):
+    """A path under --final-out, for a unit data file (bash).  With a variable
+    for --final-out, that part is in double quotes, to be expanded when the
+    runtime reads the file; the rest is quoted as anything else."""
+    if FINAL_OUT_VAR and path.startswith(FINAL_OUT_VAR):
+        rest = path[len(FINAL_OUT_VAR):]
+        return '"%s"%s' % (FINAL_OUT_VAR, sq(rest) if rest else "")
+    return sq(path)
 
 
 def dcmd(*words):
@@ -1493,7 +1523,7 @@ def emit_socket(u, ctx):
     if accepts(u):
         template = socket_service(u, ctx.loader)
         lines.append("U_ACCEPT_UNIT=%s" % sq(template))
-        lines.append("U_ACCEPT_DATA=%s" % sq(os.path.join(ctx.final_out, "unit-data", template)))
+        lines.append("U_ACCEPT_DATA=%s" % out_sq(os.path.join(ctx.final_out, "unit-data", template)))
         lines.append("U_ACCEPT_MAX=%s" % sq(u.get("MaxConnections", "64")))
     emit_exec_context(u, "Socket", lines, report)
     for key, fname in (
@@ -1966,7 +1996,10 @@ def emit_units(args, ctx, em):
                 a["d"].update({
                     "type": "process",
                     "command": em.dsv(u.atom, "run", name, *opts),
-                    "ready-notification": "pipefd:%d" % args.notification_fd,
+                    # (not pipefd:N: dinit 0.22 loses descriptor N in the
+                    # child when the write end of the service's log pipe
+                    # has that number in dinit; see unit-supervise)
+                    "ready-notification": "pipevar:UNIT_SV_READY_FD",
                     "start-timeout": dsec(start_ms),
                     # (it gives up on the process itself; this is for a
                     # supervisor that does not come back)
@@ -2111,7 +2144,7 @@ def emit_units(args, ctx, em):
                     timer_args.append("%s=%s" % (key, v))
             lines.append(sh_array("U_TIMER", timer_args))
             lines.append("U_TIMER_SERVICE=%s" % sq(svc))
-            lines.append("U_TIMER_SERVICE_DATA=%s" % sq(os.path.join(args.final_out, "unit-data", svc)))
+            lines.append("U_TIMER_SERVICE_DATA=%s" % out_sq(os.path.join(args.final_out, "unit-data", svc)))
             write(em.data_path(name), "\n".join(lines) + "\n")
             a = em.add_atom(u.atom, "longrun", name)
             data = os.path.join(args.final_out, "unit-data", name)
@@ -2215,7 +2248,13 @@ def emit_dinit(args, ctx, em, boot_atoms):
         if props["type"] != "internal":
             props.setdefault("working-dir", "/")
             if "log-type" not in props and "logfile" not in props:
-                props["logfile"] = args.catchall_log
+                if args.catchall_console:
+                    # (a user's manager: what has no logger of its own goes
+                    # where the manager's output goes, as under s6, where it
+                    # is the output of the user's s6-svscan)
+                    props["options"] = (props.get("options", "") + " shares-console").strip()
+                else:
+                    props["logfile"] = args.catchall_log
         if "consumer-of" in props:
             props["consumer-of"] = dname(props["consumer-of"])
         lines = ["# %s" % comment]
@@ -2319,13 +2358,23 @@ def main():
     ap.add_argument("--execlineb", help="(dinit) execlineb, for native oneshots")
     ap.add_argument("--catchall-log", default="/run/uncaught-logs/dinit",
                     help="(dinit) where the output of services without a logger of their own goes")
+    ap.add_argument("--catchall-console", action="store_true",
+                    help="(dinit) services without a logger of their own share dinit's output instead")
     args = ap.parse_args()
     args.final_out = args.final_out or args.out
-    global SCOPE, INIT
+    global SCOPE, INIT, FINAL_OUT_VAR
     SCOPE = args.scope
     INIT = args.init
     if INIT == "dinit" and not args.supervise:
         die("--init dinit needs --supervise")
+    # --final-out as `${NAME}/…`: where the database is differs from one
+    # manager to the next (a user's: ${UNIT_USER_STATE}/db), and dinit fills
+    # it in when it reads a description; the unit data has it in double
+    # quotes, for bash to expand (see dq, out_sq)
+    if "$" in args.final_out:
+        if INIT != "dinit" or not re.match(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}[A-Za-z0-9_./-]*$", args.final_out):
+            die("--final-out with a variable is for --init dinit, as ${NAME}/path: %r" % args.final_out)
+        FINAL_OUT_VAR = args.final_out
 
     report = Report()
     loader = Loader(args.units, report)
