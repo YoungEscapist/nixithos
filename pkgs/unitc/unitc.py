@@ -478,6 +478,18 @@ def dname(atom):
     return "".join(out)
 
 
+# A longrun that dinit itself keeps up (a logger, a native service): started
+# again whenever it ends, a second later, without ever giving up - what
+# s6-supervise does.  (dinit's own default gives up after 3 restarts in 10
+# seconds: device-watch, which ends when udevd restarts, stayed down.)
+DINIT_FOREVER = {
+    "restart": "true",
+    "smooth-recovery": "true",
+    "restart-delay": "1",
+    "restart-limit-count": "0",
+}
+
+
 def dsec(ms):
     """Milliseconds as dinit's seconds (0: no limit)."""
     return ("%.3f" % (ms / 1000.0)).rstrip("0").rstrip(".")
@@ -1980,9 +1992,8 @@ def emit_units(args, ctx, em):
                         "command": dcmd(args.runtime, "log", u.atom),
                         "consumer-of": u.atom,
                         "ready-notification": "pipefd:3",
-                        "restart": "true",
-                        "smooth-recovery": "true",
                     })
+                    log["d"].update(DINIT_FOREVER)
                     u.atoms.append(u.atom + "-log")
                 if u.all("ExecStop") and INIT == "s6":
                     hooks = em.add_atom(u.atom + "-hooks", "oneshot", name)
@@ -2149,11 +2160,10 @@ def native_dinit(em, name, a):
             "type": "process",
             "command": dq(os.path.join(here, "run")),
             "working-dir": here,
-            "restart": "true",
-            "smooth-recovery": "true",
             "start-timeout": dsec(ms("timeout-up")),
             "stop-timeout": dsec(ms("timeout-down")),
         })
+        a["d"].update(DINIT_FOREVER)
         if "notification-fd" in files:
             a["d"]["ready-notification"] = "pipefd:%d" % ms("notification-fd")
     elif a["type"] == "oneshot":

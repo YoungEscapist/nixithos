@@ -986,7 +986,7 @@ detach() {
   (
     setsid "$BASH" -c 'exec "$@"' _ \
       "$0" ${extra[@]+"${extra[@]}"} "$verb" "${units[@]}" > /dev/null 2>&1 &
-    echo "$!" > /sys/fs/cgroup/cgroup.procs 2>/dev/null
+    echo "$!" 2>/dev/null > /sys/fs/cgroup/cgroup.procs
   )
 }
 
