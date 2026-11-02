@@ -1,5 +1,6 @@
-# The services of a user: a supervision tree of their own, started with the
-# first session, stopped with the last, driven by `systemctl --user`.
+# The services of a user: a service manager of their own (an s6 tree, or
+# dinit --user with nixithos.init = "dinit"), started with the first session,
+# stopped with the last, driven by `systemctl --user`, following a switch.
 {
   name = "user-services";
 
@@ -20,12 +21,10 @@
         hello = {
           wantedBy = [ "default.target" ];
           environment.GREETING = "hi %u at %h";
-          serviceConfig = {
-            ExecStart = "${pkgs.writeShellScript "hello" ''
-              echo "$GREETING $XDG_RUNTIME_DIR" > "$XDG_RUNTIME_DIR/hello.out"
-              exec ${pkgs.coreutils}/bin/sleep infinity
-            ''}";
-          };
+          serviceConfig.ExecStart = "${pkgs.writeShellScript "hello" ''
+            echo "$GREETING $XDG_RUNTIME_DIR" > "$XDG_RUNTIME_DIR/hello.out"
+            exec ${pkgs.coreutils}/bin/sleep infinity
+          ''}";
         };
         # starts only when asked for
         on-demand = {
@@ -35,19 +34,91 @@
           };
         };
         echo.serviceConfig.ExecStart = "${pkgs.socat}/bin/socat ACCEPT-FD:3,fork EXEC:${pkgs.coreutils}/bin/cat";
+        # what a timer runs
+        tick.serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${pkgs.writeShellScript "tick" ''echo tick >> "$XDG_RUNTIME_DIR/tick.count"''}";
+        };
+        # OnFailure=
+        breaks = {
+          onFailure = [ "noticed.service" ];
+          serviceConfig.ExecStart = "${pkgs.coreutils}/bin/false";
+        };
+        noticed.serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${pkgs.coreutils}/bin/touch %t/noticed";
+        };
+        # stays as it is through the switch
+        steady = {
+          wantedBy = [ "default.target" ];
+          serviceConfig.ExecStart = "${pkgs.coreutils}/bin/sleep 1000001";
+        };
+        gone = {
+          wantedBy = [ "default.target" ];
+          serviceConfig.ExecStart = "${pkgs.coreutils}/bin/sleep 1000002";
+        };
       };
       systemd.user.sockets.echo = {
         wantedBy = [ "sockets.target" ];
         listenStreams = [ "%t/echo.sock" ];
       };
+      systemd.user.timers.tick = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnActiveSec = "1s";
+          OnUnitActiveSec = "2s";
+        };
+      };
+
+      # a switch while the user's manager runs (user-manager switch-all)
+      specialisation.next.configuration = {
+        systemd.user.services = {
+          hello.environment.GREETING = lib.mkForce "hello %u at %h";
+          gone.enable = false;
+          fresh = {
+            wantedBy = [ "default.target" ];
+            serviceConfig.ExecStart = "${pkgs.coreutils}/bin/sleep 1000003";
+          };
+        };
+      };
     };
 
-  testScript = ''
+  testScript =
+    { nodes, ... }:
+    ''
+    init = "${nodes.machine.nixithos.init}"
     machine.start()
     machine.wait_for_unit("multi-user.target")
 
     def tty_cmd(cmd):
         machine.send_chars(cmd + "\n")
+
+    st = "/run/user-managers/.state/1000"
+
+    # what the user's manager is up to, for a test that failed
+    def diagnose():
+        cmds = [
+            "cat /run/user-managers/user-1000/run",
+            "s6-svstat /run/user-managers/user-1000",
+            "tail -n 30 /run/uncaught-logs/current /run/uncaught-logs/services 2>/dev/null",
+            "ps -u alice -o pid,ppid,pgid,stat,args | cut -c1-200",
+            f"ls -la {st} {st}/units",
+        ]
+        if init == "dinit":
+            cmds += [
+                f"su alice -c 'dinitctl -p {st}/dinitctl list'",
+                f"tail -n 60 {st}/dinit.log",
+                f"for f in {st}/units/.sv/*; do echo \"$f: $(cat $f)\"; done",
+                f"for u in {st}/units/*/; do echo \"$u: $(cat $u/state $u/result 2>/dev/null | tr '\\n' ' ')\"; done",
+            ]
+        else:
+            cmds += [
+                f"ls -la {st}/service {st}/s6-rc/servicedirs | head -40",
+                f"for d in {st}/service/*; do echo $d; s6-svstat $d; done 2>&1 | head -30",
+            ]
+        for c in cmds:
+            print("$ " + c)
+            print(machine.execute(c)[1])
 
     with subtest("no manager before anyone logs in"):
         machine.fail("test -d /run/user-managers/user-1000")
@@ -61,17 +132,7 @@
         try:
             machine.wait_until_succeeds("test -s /run/user/1000/hello.out", timeout=40)
         except Exception:
-            for c in (
-                "cat /run/user-managers/user-1000/run",
-                "s6-svstat /run/user-managers/user-1000",
-                "tail -n 30 /run/uncaught-logs/current",
-                "ps -u alice -o pid,ppid,args | cut -c1-200",
-                "ls -la /run/user-managers/.state/1000/service /run/user-managers/.state/1000/s6-rc/servicedirs | head -40",
-                "for d in /run/user-managers/.state/1000/service/*; do echo $d; s6-svstat $d; done 2>&1 | head -30",
-                "cat /run/user-managers/.state/1000/s6-rc/servicedirs/s6rc-oneshot-runner/run; ls -laR /run/user-managers/.state/1000/s6-rc/servicedirs/s6rc-oneshot-runner | head -40",
-            ):
-                print("$ " + c)
-                print(machine.execute(c)[1])
+            diagnose()
             raise
         assert machine.succeed("cat /run/user/1000/hello.out").strip() == "hi alice at /home/alice /run/user/1000", machine.succeed("cat /run/user/1000/hello.out")
         # the services are the user's: owner, and no way to the system's
@@ -79,9 +140,14 @@
         # path for a process name)
         machine.wait_until_succeeds("pgrep -u alice -f 'sleep infinity'")
 
+    def user(cmd):
+        try:
+            return machine.succeed(f"su alice -c 'XDG_RUNTIME_DIR=/run/user/1000 {cmd}'", timeout=120)
+        except Exception:
+            diagnose()
+            raise
+
     with subtest("systemctl --user"):
-        def user(cmd):
-            return machine.succeed(f"su alice -c 'XDG_RUNTIME_DIR=/run/user/1000 {cmd}'")
         print(user("systemctl --user list-units --no-legend"))
         user("systemctl --user is-active hello.service")
         user("systemctl --user start on-demand.service")
@@ -96,6 +162,36 @@
     with subtest("user sockets"):
         out = machine.succeed("echo ping | su alice -c 'socat -t 3 - UNIX-CONNECT:/run/user/1000/echo.sock'").strip()
         assert out == "ping", out
+        # started by the socket, and again once stopped
+        user("systemctl --user is-active echo.service")
+        user("systemctl --user stop echo.service")
+        out = machine.succeed("echo pong | su alice -c 'socat -t 3 - UNIX-CONNECT:/run/user/1000/echo.sock'").strip()
+        assert out == "pong", out
+
+    with subtest("timers and OnFailure="):
+        machine.wait_until_succeeds("test $(wc -l < /run/user/1000/tick.count) -ge 2", timeout=40)
+        user("systemctl --user is-active tick.timer")
+        user("systemctl --user start breaks.service || true")
+        machine.wait_until_succeeds("test -e /run/user/1000/noticed", timeout=30)
+        assert user("systemctl --user is-failed breaks.service || true").strip() == "failed"
+
+    with subtest("a switch reaches the user's manager"):
+        def upid(unit):
+            return user(f"systemctl --user show -p MainPID --value {unit}").strip()
+        before = {u: upid(u) for u in ("hello", "steady", "gone")}
+        assert all(p not in ("", "0") for p in before.values()), before
+        print(machine.succeed("/run/current-system/specialisation/next/bin/switch-to-configuration test 2>&1"))
+        if init == "dinit":
+            machine.succeed("test \"$(readlink -f /run/user-managers/.state/1000/db)\" = \"$(readlink -f /run/current-system/s6-db)/user\"")
+        machine.wait_until_succeeds("grep -q '^hello alice' /run/user/1000/hello.out", timeout=30)
+        assert upid("hello") != before["hello"]
+        assert upid("steady") == before["steady"], "an unchanged service was restarted"
+        machine.wait_until_succeeds("pgrep -u alice -f 'sleep 1000003'", timeout=30)
+        user("systemctl --user is-active fresh.service")
+        machine.wait_until_fails("pgrep -u alice -f 'sleep 1000002'", timeout=30)
+        # what does not change goes on working
+        out = machine.succeed("echo again | su alice -c 'socat -t 3 - UNIX-CONNECT:/run/user/1000/echo.sock'").strip()
+        assert out == "again", out
 
     with subtest("session bus"):
         user("busctl --user list >/dev/null 2>&1 || dbus-send --session --print-reply --dest=org.freedesktop.DBus / org.freedesktop.DBus.ListNames")

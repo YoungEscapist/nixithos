@@ -6,7 +6,8 @@
 # Everything else is the same for both: the units NixOS generates, the unit
 # compiler (unitc) that turns them into the services of either, the runtime
 # that starts a unit's processes, the systemctl and journalctl that drive
-# them, the loggers, the fd holder of sockets, the managers of users.
+# them, the loggers, the fd holder of sockets.  The managers of users are of
+# the same kind as the system's: s6 trees, or dinit --user.
 { lib, ... }:
 
 {

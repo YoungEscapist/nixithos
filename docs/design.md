@@ -761,8 +761,8 @@ user-manager session  (as the user)
   on the swapped libraries;
 - `elogind`: sessions, `loginctl`, `/run/user/UID`, closing a session;
 - `user-services`: the user manager: starting with the first login,
-  services, `systemctl --user`, sockets, the bus, the environment, stopping,
-  coming back;
+  services, `systemctl --user`, sockets, timers, `OnFailure=`, the bus, the
+  environment, a configuration switch, stopping, coming back;
 - `sandbox`: every sandbox directive with one unit each, checking the
   verdict from inside and outside;
 - `timesync`: the clock follows the server (our own SNTP server in Python in

@@ -86,15 +86,15 @@ More in [docs/design.md](docs/design.md).
 ### dinit instead of s6
 
 The init system is a setting: `nixithos.init = "dinit";` (the installer asks
-too). dinit is PID 1 and the service manager then; the units, `systemctl`,
-`journalctl`, the logs and the managers of users stay the same. The unit
-compiler writes dinit's service descriptions from the same graph, and since
-dinit tells requirement from ordering itself (`depends-on`, `waits-for`,
-`after`), one set of them does for the boot and for what comes after: no
-second database. A unit's processes run under `unit-supervise`, which does
-for them what `s6-supervise` does under s6. A switch to the other init
-system applies the rest of the configuration at once and the init system at
-the next boot.
+too). dinit is PID 1 and the service manager then, and each user's manager
+is `dinit --user`; the units, `systemctl` (with `--user` too), `journalctl`
+and the logs stay the same. The unit compiler writes dinit's service
+descriptions from the same graph, and since dinit tells requirement from
+ordering itself (`depends-on`, `waits-for`, `after`), one set of them does
+for the boot and for what comes after: no second database. A unit's
+processes run under `unit-supervise`, which does for them what
+`s6-supervise` does under s6. A switch to the other init system applies the
+rest of the configuration at once and the init system at the next boot.
 
 ```console
 $ cat /proc/1/comm
