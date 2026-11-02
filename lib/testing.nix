@@ -15,6 +15,8 @@
   # would: nixpkgs' own list of modules plus modules/default.nix, instead of
   # ./modules/module-list.nix as the base
   moduleMode ? false,
+  # the init system of the nodes, unless a test says otherwise (nixithos.init)
+  init ? "s6",
 }:
 
 let
@@ -82,6 +84,7 @@ let
       config.passthru.nixithos = true;
 
       config.defaults.s6.systemdPackages = lib.mkDefault systemdPackages;
+      config.defaults.nixithos.init = lib.mkDefault init;
       # what failed and why ends up in the test log
       config.defaults.s6.logging.echoFailures = lib.mkDefault true;
     };

@@ -454,7 +454,10 @@
       systemd.targets.multi-user.wants = [ "t-template@one.service" ];
     };
 
-  testScript = ''
+  testScript =
+    { nodes, ... }:
+    ''
+    init = "${nodes.machine.nixithos.init}"
     machine.start()
     machine.wait_for_unit("multi-user.target")
 
@@ -483,8 +486,12 @@
         machine.fail("systemctl is-active t-hooks")
         machine.succeed("systemctl start t-hooks && systemctl is-active t-hooks")
         # the native way stops it too, hooks included
-        machine.succeed("rm /run/t-hooks.stop && s6-rc -d change t-hooks && test -e /run/t-hooks.stop")
-        machine.succeed("s6-rc -u change t-hooks-hooks && systemctl is-active t-hooks")
+        if init == "dinit":
+            machine.succeed("rm /run/t-hooks.stop && dinitctl stop --force t-hooks && test -e /run/t-hooks.stop")
+            machine.succeed("dinitctl start t-hooks && systemctl is-active t-hooks")
+        else:
+            machine.succeed("rm /run/t-hooks.stop && s6-rc -d change t-hooks && test -e /run/t-hooks.stop")
+            machine.succeed("s6-rc -u change t-hooks-hooks && systemctl is-active t-hooks")
 
     with subtest("restart policy"):
         machine.wait_until_succeeds("test $(wc -l < /run/t-restart.count) -ge 3")

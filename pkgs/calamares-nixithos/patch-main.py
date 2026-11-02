@@ -7,6 +7,7 @@
 #   - the users' shell (bash, zsh, fish or nushell);
 #   - the boot loader (systemd-boot, Limine, GRUB or rEFInd on UEFI; GRUB on
 #     BIOS);
+#   - the init system (s6 or dinit: nixithos.init);
 #   - the configuration in /etc/nixith, written by `nixith generate-config`
 #     and installed by `nixith install`;
 #   - the name: NixithOS, and "nixith" for a machine nobody named.
@@ -103,6 +104,19 @@ NIXITHOS_EFI_LOADERS = {
 """,
 }
 
+NIXITHOS_INITS = {
+    "s6": """\\
+  # The init system: s6 (s6-linux-init and s6-rc), the default.  The other
+  # one takes over at the next boot after a switch: nixithos.init = "dinit";
+
+""",
+    "dinit": """\\
+  # The init system: dinit, in place of s6 (the default).
+  nixithos.init = "dinit";
+
+""",
+}
+
 cfgbootgrubbtrfs = """\\
   # Use provided UUIDs instead of blkid probing (required for btrfs subvolumes)
   boot.loader.grub.fsIdentifier = "provided";
@@ -130,7 +144,10 @@ replace(
 replace(
     '''    # Choose desktop environment
     if gs.value("packagechooser_packagechooser") == "gnome":''',
-    '''    # Choose desktop environment
+    '''    # The init system of one's choice
+    cfg += NIXITHOS_INITS.get(gs.value("packagechooser_init") or "s6", NIXITHOS_INITS["s6"])
+
+    # Choose desktop environment
     if gs.value("packagechooser_packagechooser") in NIXITHOS_DESKTOPS:
         cfg += cfgnixithos
         catenate(variables, "desktop", gs.value("packagechooser_packagechooser"))

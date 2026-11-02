@@ -26,7 +26,10 @@
       };
     };
 
-  testScript = ''
+  testScript =
+    { nodes, ... }:
+    ''
+    pid1 = "${if nodes.server.nixithos.init == "dinit" then "dinit" else "s6-svscan"}"
     start_all()
     server.wait_for_unit("multi-user.target")
     client.wait_for_unit("multi-user.target")
@@ -60,7 +63,7 @@
         )
         print(out)
         assert "hello from server" in out
-        assert "s6-svscan" in out
+        assert pid1 in out
         # sessions do not die with a reload of the daemon
         server.succeed("systemctl reload sshd && systemctl is-active sshd")
 

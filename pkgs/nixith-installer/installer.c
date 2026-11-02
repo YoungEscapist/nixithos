@@ -3,7 +3,8 @@
  *
  * A wizard over ncurses: the steps of the old Calamares installer (time
  * zone, language, keyboard, user, desktop, login, shell, boot loader,
- * unfree software, disk) and the kernel, with a network step in front of
+ * unfree software, disk), the kernel and the init system, with a network
+ * step in front of
  * them that does what nmtui does, only simpler: the wired network by
  * itself, a list of Wi-Fi networks, and a form for a connection that needs
  * more than a password (802.1X, a hidden network, PPPoE, an address by
@@ -84,7 +85,7 @@ static struct {
     char fullname[160], user[64], host[64];
     char pw1[128], pw2[128], rpw1[128], rpw2[128];
     int rootsame, autologin, user_edited;
-    int desktop, dm, shell, loader, kernel, unfree;
+    int desktop, dm, shell, loader, kernel, init, unfree;
     char disk[64], disk_desc[200];
     int manual, fs, efi;
 } S = { .rootsame = 1, .host = "nixith" };
@@ -188,6 +189,17 @@ static const struct opt kernels[] = {
 };
 #define NKERNELS (int)(sizeof kernels / sizeof *kernels)
 
+/* id: nixithos.init */
+static const struct opt inits[] = {
+    { "s6", "s6",
+      "s6-linux-init as PID 1 and s6-rc running the services: what NixithOS was built on, and the most tested. Each service has its own supervisor and logger.",
+      "s6-linux-init как PID 1 и s6-rc, который запускает службы: то, на чём построена NixithOS, и самое проверенное. У каждой службы свой надзиратель и свой логгер." },
+    { "dinit", "dinit",
+      "dinit as PID 1 and service manager: one small program that knows what a service requires from what it only comes after, as systemd does. The same units, systemctl and logs as with s6.",
+      "dinit как PID 1 и менеджер служб: одна небольшая программа, которая, как systemd, отличает то, что службе нужно, от того, после чего она лишь идёт. Те же юниты, systemctl и журналы, что и с s6." },
+};
+#define NINITS (int)(sizeof inits / sizeof *inits)
+
 static const struct opt locales[] = {
     { "en_US.UTF-8", "English (United States)" }, { "en_GB.UTF-8", "English (United Kingdom)" },
     { "ru_RU.UTF-8", "Русский" }, { "uk_UA.UTF-8", "Українська" }, { "be_BY.UTF-8", "Беларуская" },
@@ -229,18 +241,18 @@ static const char *optname(const struct opt *o)
 
 enum {
     ST_WELCOME, ST_GUIDE, ST_NETWORK, ST_TZ, ST_LOCALE, ST_KEYBOARD, ST_USER,
-    ST_DESKTOP, ST_LOGIN, ST_SHELL, ST_LOADER, ST_KERNEL, ST_UNFREE, ST_DISK,
-    ST_SUMMARY, ST_INSTALL, NSTEPS
+    ST_DESKTOP, ST_LOGIN, ST_SHELL, ST_LOADER, ST_KERNEL, ST_INIT, ST_UNFREE,
+    ST_DISK, ST_SUMMARY, ST_INSTALL, NSTEPS
 };
 
 static const char *step_name(int i)
 {
     static const char *en[] = { "Welcome", "Guide", "Network", "Time zone", "Language",
         "Keyboard", "User", "Desktop", "Login", "Shell", "Boot loader", "Kernel",
-        "Software", "Disk", "Summary", "Install" };
+        "Init system", "Software", "Disk", "Summary", "Install" };
     static const char *r[] = { "Приветствие", "Справка", "Сеть", "Часовой пояс", "Язык",
         "Клавиатура", "Пользователь", "Рабочий стол", "Вход", "Оболочка", "Загрузчик",
-        "Ядро", "Программы", "Диск", "Итог", "Установка" };
+        "Ядро", "Init-система", "Программы", "Диск", "Итог", "Установка" };
     return ru ? r[i] : en[i];
 }
 
@@ -1166,8 +1178,8 @@ static int step_welcome(void)
     int sel = ru;
     struct menu m = {
         .title = T("Welcome to NixithOS", "Добро пожаловать в NixithOS"),
-        .intro = T("NixOS without systemd: the same packages and configuration, with s6-rc running the system. Choose the language of the installer.",
-                   "NixOS без systemd: те же пакеты и конфигурация, а систему запускает s6-rc. Выберите язык установщика."),
+        .intro = T("NixOS without systemd: the same packages and configuration, with s6 or dinit running the system. Choose the language of the installer.",
+                   "NixOS без systemd: те же пакеты и конфигурация, а систему запускает s6 или dinit. Выберите язык установщика."),
         .art = art, .nart = nart, .items = langs, .n = 2,
         .keys = "↑↓  Enter  F10",
     };
@@ -2438,7 +2450,7 @@ static int step_user(void)
     }
 }
 
-/* --- 8.-13. desktop, login, shell, boot loader, kernel, software ------------ */
+/* --- 8.-14. desktop, login, shell, boot loader, kernel, init, software ------ */
 
 static const struct opt *desc_table;
 
@@ -2527,6 +2539,14 @@ static int step_kernel(void)
     return choose(T("Kernel", "Ядро"), intro, kernels, NKERNELS, &S.kernel);
 }
 
+static int step_init(void)
+{
+    return choose(T("Init system", "Init-система"),
+                  T("What starts the system and runs its services. Both run the same configuration: the services of NixOS's modules, systemctl, journalctl. It can be changed later: nixithos.init in /etc/nixith/configuration.nix, and a reboot.",
+                    "То, что запускает систему и её службы. Обе работают с одной и той же конфигурацией: службы модулей NixOS, systemctl, journalctl. Сменить можно и потом: nixithos.init в /etc/nixith/configuration.nix и перезагрузка."),
+                  inits, NINITS, &S.init);
+}
+
 static int step_unfree(void)
 {
     static const struct opt sw[] = {
@@ -2550,7 +2570,7 @@ static int step_unfree(void)
     return run_menu(&m, &S.unfree);
 }
 
-/* --- 14. disk ---------------------------------------------------------------- */
+/* --- 15. disk ---------------------------------------------------------------- */
 
 struct disk {
     char dev[64], label[200], desc[200];
@@ -2709,7 +2729,7 @@ static int step_disk(void)
     }
 }
 
-/* --- 15. summary ------------------------------------------------------------- */
+/* --- 16. summary ------------------------------------------------------------- */
 
 static int step_summary(void)
 {
@@ -2737,6 +2757,7 @@ static int step_summary(void)
         ROW(T("Shell", "Оболочка"), "%s", shells[S.shell].name);
         ROW(T("Boot loader", "Загрузчик"), "%s", S.efi ? loaders[S.loader].name : "GRUB (BIOS)");
         ROW(T("Kernel", "Ядро"), "%s", kernels[S.kernel].name);
+        ROW(T("Init system", "Init-система"), "%s", inits[S.init].name);
         ROW(T("Software", "Программы"), "%s", S.unfree ? T("unfree allowed", "несвободные разрешены") : T("only free", "только свободные"));
         if (S.manual)
             ROW(T("Disk", "Диск"), "%s", T("mounted on /mnt by hand", "смонтирован в /mnt вручную"));
@@ -2782,7 +2803,7 @@ static int step_summary(void)
     }
 }
 
-/* --- 16. install ------------------------------------------------------------- */
+/* --- 17. install ------------------------------------------------------------- */
 
 static void hash(const char *pw, char *out, int size)
 {
@@ -2822,6 +2843,7 @@ static void setenv_choices(void)
     setenv("NI_SHELL", shells[S.shell].id, 1);
     setenv("NI_LOADER", loaders[S.loader].id, 1);
     setenv("NI_KERNEL", kernels[S.kernel].id, 1);
+    setenv("NI_INIT", inits[S.init].id, 1);
     setenv("NI_UNFREE", S.unfree ? "1" : "0", 1);
     char files[4096];
     kept_files(files, sizeof files);
@@ -2850,9 +2872,9 @@ static const struct tip {
     const char *kicker[2], *title[2], *body[2], *cmd, *img;
 } tips[] = {
     { { "NixithOS", "NixithOS" }, { "NixOS, without systemd", "NixOS без systemd" },
-      { "PID 1 is s6-linux-init, services run under s6-rc, devices are eudev's and logs s6-log's. The packages, the modules and configuration.nix are NixOS's own.",
-        "PID 1 — s6-linux-init, службы работают под s6-rc, устройства — от eudev, журналы — от s6-log. Пакеты, модули и configuration.nix — те же, что в NixOS." },
-      "cat /proc/1/comm      # s6-svscan", NULL },
+      { "PID 1 is s6-linux-init with s6-rc, or dinit: the one chosen. Devices are eudev's, logs s6-log's. The packages, the modules and configuration.nix are NixOS's own.",
+        "PID 1 — s6-linux-init с s6-rc или dinit, что выбрано. Устройства — от eudev, журналы — от s6-log. Пакеты, модули и configuration.nix — те же, что в NixOS." },
+      "cat /proc/1/comm      # s6-svscan, dinit", NULL },
     { { "Configuration", "Конфигурация" }, { "One file describes the whole system", "Вся система описана одним файлом" },
       { "Users, services, desktop, packages: everything is in /etc/nixith/configuration.nix. Change it, then build and switch to it in one go.",
         "Пользователи, службы, рабочий стол, пакеты — всё в /etc/nixith/configuration.nix. Измените его, а потом соберите систему и переключитесь на неё одной командой." },
@@ -2870,9 +2892,9 @@ static const struct tip {
         "build-vm собирает ту же систему в скрипт, который запускает её в QEMU, не трогая работающую." },
       "nixith build-vm && ./result/bin/run-*-vm", NULL },
     { { "Services", "Службы" }, { "systemctl still works", "systemctl по-прежнему работает" },
-      { "It is a thin wrapper over s6-rc: start, stop, restart, status. The native tools are there too.",
-        "Это тонкая обёртка над s6-rc: start, stop, restart, status. Родные инструменты тоже на месте." },
-      "systemctl restart sshd\ns6-rc -a list", NULL },
+      { "It is a thin wrapper over s6-rc or dinit: start, stop, restart, status. The native tools are there too.",
+        "Это тонкая обёртка над s6-rc или dinit: start, stop, restart, status. Родные инструменты тоже на месте." },
+      "systemctl restart sshd\ns6-rc -a list        # dinitctl list", NULL },
     { { "Services", "Службы" }, { "Logs are plain files", "Журналы — обычные файлы" },
       { "Every service writes to /var/log/s6/<service>/ through its own logger; journalctl -u reads those directories.",
         "Каждая служба пишет в /var/log/s6/<служба>/ через свой логгер; journalctl -u читает эти каталоги." },
@@ -3208,8 +3230,8 @@ int main(int argc, char **argv)
 
     int (*steps[NSTEPS])(void) = {
         step_welcome, step_guide, step_network, step_tz, step_locale, step_keyboard, step_user,
-        step_desktop, step_login, step_shell, step_loader, step_kernel, step_unfree, step_disk,
-        step_summary, step_install,
+        step_desktop, step_login, step_shell, step_loader, step_kernel, step_init, step_unfree,
+        step_disk, step_summary, step_install,
     };
     for (cur_step = 0; cur_step < NSTEPS;) {
         int r = steps[cur_step]();

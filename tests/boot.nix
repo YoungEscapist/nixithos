@@ -1,5 +1,5 @@
-# The system boots on s6, reaches its default target with nothing failed,
-# and shuts down cleanly.
+# The system boots on s6 (or dinit, as dinit.boot), reaches its default
+# target with nothing failed, and shuts down cleanly.
 {
   name = "boot";
 
@@ -17,15 +17,28 @@
       users.users.bob.isNormalUser = true;
     };
 
-  testScript = ''
+  testScript =
+    { nodes, ... }:
+    ''
+    init = "${nodes.machine.nixithos.init}"
     machine.start()
     machine.wait_for_unit("multi-user.target")
 
-    with subtest("init is s6"):
-        machine.succeed("grep -q s6-svscan /proc/1/cmdline")
+    with subtest(f"init is {init}"):
         machine.fail("pgrep -x systemd")
-        # the boot transaction is over and the steady database is live
-        machine.succeed("readlink /run/s6-rc/compiled | grep -q '/compiled$'")
+        if init == "dinit":
+            machine.succeed("grep -qx dinit /proc/1/comm")
+            # the services are read from the database of this configuration
+            machine.succeed('test "$(readlink -f /run/units/.db)" = "$(readlink -f /run/current-system/s6-db)"')
+            machine.succeed("dinitctl list | grep -q '^\\[\\[+\\]' ")
+            print(machine.succeed("dinitctl list"))
+            # poweroff & co. are systemctl's (they stop the units in order),
+            # not dinit's own
+            machine.succeed("readlink -f $(command -v poweroff) | grep -q systemctl")
+        else:
+            machine.succeed("grep -q s6-svscan /proc/1/cmdline")
+            # the boot transaction is over and the steady database is live
+            machine.succeed("readlink /run/s6-rc/compiled | grep -q '/compiled$'")
         machine.succeed("test ! -e /run/units/.booting")
 
     with subtest("nothing failed"):

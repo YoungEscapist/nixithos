@@ -1,6 +1,6 @@
 #!@shell@
 # systemctl - the part of systemctl that scripts and habits rely on, for a
-# system whose services are run by s6-rc.
+# system whose services are run by s6-rc or by dinit.
 #
 # Units are looked up in the index of the live service database (written by
 # unitc).  Starting a unit goes through s6-rc, so that what it requires comes
@@ -8,6 +8,14 @@
 # does, which is why they talk to the supervisor directly.  `s6-rc -d change`
 # is there for whoever wants a service stopped together with everything that
 # depends on it.
+#
+# Under dinit (the system's manager, when nixithos.init = "dinit"; the
+# managers of users are s6 either way), starting, stopping and restarting go
+# through dinitctl, which knows requirement from ordering: what requires a
+# unit stops and restarts with it, as with systemd.  The processes of a unit
+# run under unit-supervise, whose status file (/run/units/.sv/ATOM) says
+# whether they run; a unit whose process has ended for good stays "started"
+# to dinit, and its supervisor starts it again when told (SIGUSR1).
 
 PATH=@path@:$PATH
 RUNTIME=@runtime@
@@ -18,6 +26,9 @@ STATE=/run/units
 SCAN=/run/service
 LOGDIR=/var/log/s6
 LIVE=/run/s6-rc
+# s6 or dinit: which of the two runs the services of the scope in use
+INIT=s6
+DINITCTL=(dinitctl -p /run/dinitctl)
 
 # s6-rc against the service manager of the scope in use (the system's, or
 # with --user the one of the logged-in user)
@@ -54,6 +65,12 @@ discover() {
       fi
       sleep 0.1
     done
+  fi
+  if (( ! opt_user )) && [[ -L $STATE/.db && ! -e $LIVE/compiled ]]; then
+    # dinit: its init points /run/units/.db at the database in use
+    INIT=dinit
+    DB=$(readlink -f "$STATE/.db")
+    return
   fi
   live=$(readlink -f "$LIVE/compiled" 2>/dev/null) || live=
   if [[ -n $live ]]; then
@@ -153,7 +170,7 @@ while (( $# )); do
     --job-mode=*|--kill-whom=*|--kill-who=*|--output=*|-o*|--root=*|--runtime|--global|--when=*|--message=*) ;;
     -H|--host|-M|--machine|--job-mode|--kill-whom|--kill-who|-o|--output|--root|--when|--message) shift ;;
     -h|--help) args=(help) ;;
-    --version) echo "systemctl (s6-rc front-end) 0.1"; exit 0 ;;
+    --version) echo "systemctl (s6-rc and dinit front-end) 0.1"; exit 0 ;;
     --) shift; args+=("$@"); break ;;
     -*) warn "ignoring unknown option $1" ;;
     *) args+=("$1") ;;
@@ -237,6 +254,19 @@ resolve() {
 rc_up=
 rc_busy=0
 load_rc() {
+  if [[ $INIT == dinit ]]; then
+    # what dinit has started, by dinit name ("[{+}     ] name …": the third
+    # character is + when started, s when its start was skipped)
+    local line name
+    rc_up=" "
+    rc_busy=0
+    while IFS= read -r line; do
+      [[ ${line:2:1} == [+s] ]] || continue
+      name=${line:11}
+      rc_up+="${name%% *} "
+    done < <("${DINITCTL[@]}" list 2>/dev/null)
+    return 0
+  fi
   if rc_up=$(rc -a list 2>/dev/null); then
     rc_up=" ${rc_up//$'\n'/ } "
     rc_busy=0
@@ -247,7 +277,37 @@ load_rc() {
   fi
 }
 
-is_rc_up() { [[ $rc_up == *" $1 "* ]]; }
+is_rc_up() {
+  if [[ $INIT == dinit ]]; then
+    dname "$1"
+    [[ $rc_up == *" $DN "* ]]
+  else
+    [[ $rc_up == *" $1 "* ]]
+  fi
+}
+
+# DN: the name dinit knows ATOM $1 by (unitc's dname: `@`, `\`, `:` are not
+# allowed in it)
+dname() {
+  DN=${1//@/＠}
+  DN=${DN//\\/∖}
+  DN=${DN//:/꞉}
+}
+
+# sv_status ATOM: what unit-supervise says (dinit), in sv_up, sv_ready,
+# sv_pid, sv_svpid, sv_phase; 1 if no supervisor is there
+sv_status() {
+  local want
+  sv_up=0 sv_ready=0 sv_pid= sv_svpid= sv_phase=
+  [[ -r $STATE/.sv/$1 ]] || return 1
+  read -r sv_up sv_ready sv_pid want sv_svpid sv_phase < "$STATE/.sv/$1" || return 1
+  [[ $sv_pid == -1 ]] && sv_pid=
+  if [[ $sv_phase == exit ]] || ! kill -0 "$sv_svpid" 2>/dev/null; then
+    sv_up=0 sv_ready=0 sv_pid=
+    return 1
+  fi
+  return 0
+}
 
 # longrun? (as opposed to something that runs to completion)
 is_longrun() {
@@ -255,7 +315,18 @@ is_longrun() {
   [[ ${I_KIND[$1]} == service && ${I_TYPE[$1]} != oneshot ]]
 }
 
-svfield() { s6-svstat -o "$2" "$SCAN/$1" 2>/dev/null; }
+svfield() {
+  if [[ $INIT == dinit ]]; then
+    # (as s6-svstat -o has them: up,ready or pid)
+    sv_status "$1"
+    case $2 in
+      pid) printf '%s\n' "${sv_pid:--1}" ;;
+      *) printf '%s %s\n' "$( (( sv_up )) && echo true || echo false)" "$( (( sv_ready )) && echo true || echo false)" ;;
+    esac
+    return
+  fi
+  s6-svstat -o "$2" "$SCAN/$1" 2>/dev/null
+}
 
 # sets active_state and sub_state for $1
 unit_state() {
@@ -365,9 +436,62 @@ unit_timeout() {
   printf '%s' "${t:-0}"
 }
 
+# (dinit) Start one unit: through dinit when it has the unit stopped (what the
+# unit requires comes up with it); when it has it started already, its
+# processes are started again, as direct_start does under s6.
+dinit_start() {
+  local u=$1 atom=${I_ATOM[$1]} rc=0
+  if ! is_rc_up "$atom"; then
+    dname "$atom"
+    "${DINITCTL[@]}" --quiet start "$DN" || rc=1
+    rc_up+="$DN "
+    if ! is_longrun "$u"; then
+      (( rc == 0 )) && { unit_state "$u"; [[ $active_state == failed ]] && rc=1; }
+      return $rc
+    fi
+  fi
+  if is_longrun "$u"; then
+    (( rc == 0 )) || return 1
+    sv_status "$atom" || { warn "$u: its supervisor is not running"; return 1; }
+    (( sv_ready )) && return 0
+    if (( ! sv_up )) && [[ $sv_phase != run ]]; then
+      rm -f "$STATE/$u/starts" "$STATE/$u/nrestarts"
+      kill -USR1 "$sv_svpid"
+    fi
+    # until it is ready, or has ended for good (as `s6-svwait -U`)
+    local t i
+    t=$(unit_timeout "$u" START)
+    (( t > 0 )) || t=90000
+    for (( i = 0; i < t / 100; i++ )); do
+      sleep 0.1
+      sv_status "$atom" || return 1
+      (( sv_ready )) && return 0
+      [[ $sv_phase == idle ]] && break
+    done
+    unit_state "$u"
+    [[ $active_state == active || $active_state == activating ]]
+    return
+  fi
+  local verb
+  case ${I_KIND[$u]} in
+    service) verb=up ;;
+    mount) verb=mount-up ;;
+    swap) verb=swap-up ;;
+    socket) verb=socket-up ;;
+    *) return 0 ;;
+  esac
+  run_rt "$verb" "$DB/unit-data/$u" || rc=$?
+  if (( rc == 0 )); then
+    unit_state "$u"
+    [[ $active_state == failed ]] && rc=1
+  fi
+  return $rc
+}
+
 # Start one unit directly, without s6-rc: its own processes only.
 direct_start() {
   local u=$1 atom=${I_ATOM[$1]}
+  [[ $INIT == dinit ]] && { dinit_start "$u"; return; }
   if is_longrun "$u"; then
     [[ -d $SCAN/$atom ]] || { warn "$u: no service directory"; return 1; }
     [[ -d $SCAN/$atom-log ]] && s6-svc -u "$SCAN/$atom-log"
@@ -408,6 +532,16 @@ direct_start() {
 
 direct_stop() {
   local u=$1 atom=${I_ATOM[$1]}
+  if [[ $INIT == dinit ]]; then
+    # (--force: what requires it stops with it, as with systemd)
+    dname "$atom"
+    "${DINITCTL[@]}" --quiet stop --force --ignore-unstarted "$DN"
+    if is_longrun "$u" && [[ -r $STATE/$u/state && $(< "$STATE/$u/state") == activating ]]; then
+      printf 'inactive\n' > "$STATE/$u/state"
+      printf 'success\n' > "$STATE/$u/result"
+    fi
+    return 0
+  fi
   if is_longrun "$u"; then
     [[ -d $SCAN/$atom ]] || return 0
     [[ " ${I_ATOMS[$u]} " == *" $atom-hooks "* ]] && run_rt stop-hook "$DB/unit-data/$u"
@@ -491,6 +625,13 @@ do_start() {
   done
   (( ${#list[@]} )) || return $rc
   load_rc
+  if [[ $INIT == dinit ]]; then
+    for u in "${list[@]}"; do
+      dinit_start "$u" || rc=1
+      [[ ${I_KIND[$u]} == target ]] && { reactivate "$u" || rc=1; }
+    done
+    return $rc
+  fi
   if (( rc_busy )); then
     # A target is only brought up through s6-rc, which is busy with the boot:
     # the request is queued behind it, as systemd would.
@@ -593,11 +734,26 @@ do_restart() {
       # a file that the runtime acts on, when the start is done (it is still
       # being started) or at once (it is running).
       : > "$STATE/$unit/restart-requested"
-      [[ $active_state == active ]] && s6-svc -t "$SCAN/${I_ATOM[$unit]}"
+      if [[ $active_state == active ]]; then
+        if [[ $INIT == dinit ]]; then
+          # (unit-supervise: HUP stops the process; it is started again)
+          sv_status "${I_ATOM[$unit]}" && kill -HUP "$sv_svpid"
+        else
+          s6-svc -t "$SCAN/${I_ATOM[$unit]}"
+        fi
+      fi
       continue
     fi
     if [[ ${I_KIND[$unit]} == target ]]; then
       do_start "$unit" || rc=1
+      continue
+    fi
+    if [[ $INIT == dinit ]] && is_rc_up "${I_ATOM[$unit]}"; then
+      # (--force: what requires it is restarted with it, as with systemd)
+      dname "${I_ATOM[$unit]}"
+      "${DINITCTL[@]}" --quiet restart --force "$DN" || rc=1
+      load_rc
+      dinit_start "$unit" || rc=1
       continue
     fi
     direct_stop "$unit"
@@ -639,7 +795,7 @@ show_status() {
   echo "     Loaded: loaded ($DB/units/$u; $([[ ${I_BOOT[$u]} == 1 ]] && echo enabled || echo static))"
   echo "     Active: $active_state ($sub_state)${since:+ since $since}"
   [[ -n $pid ]] && echo "   Main PID: $pid ($(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-60))"
-  echo "     s6-rc: ${I_ATOMS[$u]}"
+  echo "     $([[ $INIT == dinit ]] && echo dinit || echo s6-rc): ${I_ATOMS[$u]}"
   if [[ -r /sys/fs/cgroup/units/${I_ATOM[$u]}/cgroup.procs ]]; then
     local procs
     procs=$(tr '\n' ' ' < "/sys/fs/cgroup/units/${I_ATOM[$u]}/cgroup.procs")
@@ -753,10 +909,53 @@ list_units() {
   done
 }
 
+# (dinit) Stop the units rank by rank, last started first, as rc.shutdown does
+# for s6: dinit's own rollback follows requirements only, not After=.
+dinit_stop_ordered() {
+  local rank atom prev= batch=() d n
+  declare -A names=()
+  load_rc
+  [[ -r $DB/ranks.tsv ]] || return 0
+  flush() {
+    (( ${#batch[@]} )) || return 0
+    for d in "${batch[@]}"; do
+      "${DINITCTL[@]}" --quiet stop --force --no-wait --ignore-unstarted "$d" 2>/dev/null
+    done
+    # (until they have, at most a minute and a half for a rank)
+    for (( n = 0; n < 900; n++ )); do
+      load_rc
+      local left=0
+      for d in "${batch[@]}"; do [[ $rc_up == *" $d "* ]] && left=1; done
+      (( left )) || break
+      sleep 0.1
+    done
+    batch=()
+  }
+  while IFS=$'\t' read -r rank atom; do
+    [[ $rank == "$prev" ]] || flush
+    prev=$rank
+    # (the loggers stop with what they log for)
+    [[ $atom == *-log ]] && continue
+    dname "$atom"
+    [[ $rc_up == *" $DN "* ]] && batch+=("$DN")
+  done < <(sort -rn "$DB/ranks.tsv")
+  flush
+}
+
 power() {
   # halt | poweroff | reboot
   local flag
   case $1 in halt) flag=-h ;; poweroff) flag=-p ;; reboot) flag=-r ;; esac
+  if [[ $INIT == dinit ]]; then
+    local dsd
+    dsd=$(type -P dinitctl) || die "dinitctl is not there"
+    # (dinit's shutdown, next to it: not the one of the system's profile)
+    dsd=${dsd%/*}/shutdown
+    # -ff: at once, without stopping anything
+    (( opt_force >= 2 )) && exec "$dsd" --system "$flag"
+    (( opt_force )) || dinit_stop_ordered
+    exec "$dsd" "$flag"
+  fi
   if (( opt_force >= 2 )); then
     exec s6-linux-init-hpr -f "$flag"
   fi
@@ -798,7 +997,7 @@ case $verb in
     cat <<'EOF'
 systemctl [OPTIONS…] COMMAND [UNIT…]
 
-Front-end to s6-rc for systemd-style units.
+Front-end to s6-rc (or dinit) for systemd-style units.
 
   start, stop, restart, try-restart, reload, reload-or-restart, kill
   status, show, cat, is-active, is-failed, is-enabled, is-system-running
@@ -806,8 +1005,8 @@ Front-end to s6-rc for systemd-style units.
   poweroff, reboot, halt, suspend
   daemon-reload                  (nothing to do: the database is compiled)
 
-Native tools: s6-rc -a list, s6-rc-db, s6-svstat /run/service/NAME,
-logs in /var/log/s6/NAME/current.
+Native tools: s6-rc -a list, s6-rc-db, s6-svstat /run/service/NAME (s6);
+dinitctl list, /run/units/.sv/NAME (dinit); logs in /var/log/s6/NAME/current.
 EOF
     ;;
   start)
@@ -883,7 +1082,7 @@ EOF
       echo "● $(< /proc/sys/kernel/hostname)"
       echo "    State: $( { (( rc_busy )) || [[ -e $STATE/.booting ]]; } && echo starting || { (( failed )) && echo degraded || echo running; })"
       echo "    Units: ${#I_KIND[@]} loaded, $failed failed"
-      echo "     Init: s6-linux-init / s6-rc ($DB)"
+      if [[ $INIT == dinit ]]; then echo "     Init: dinit ($DB)"; else echo "     Init: s6-linux-init / s6-rc ($DB)"; fi
       exit 0
     fi
     rc=0
@@ -933,7 +1132,7 @@ EOF
   show)
     load_index; load_rc
     if (( ${#units[@]} == 0 )); then
-      echo "Version=s6-rc"
+      echo "Version=$([[ $INIT == dinit ]] && echo dinit || echo s6-rc)"
       echo "SystemState=$( (( rc_busy )) && echo starting || echo running)"
       exit 0
     fi
@@ -1034,7 +1233,9 @@ EOF
     exit 0 ;;
   get-default) load_index; echo "${ALIAS[default.target]-multi-user.target}" ;;
   poweroff|halt|reboot) power "$verb" ;;
-  kexec) exec s6-linux-init-hpr -r ;;
+  kexec)
+    if [[ $INIT == dinit ]]; then d=$(type -P dinitctl) && exec "${d%/*}/shutdown" -k; fi
+    exec s6-linux-init-hpr -r ;;
   suspend|hibernate|hybrid-sleep|suspend-then-hibernate)
     if command -v loginctl > /dev/null 2>&1; then exec loginctl "$verb"; fi
     case $verb in

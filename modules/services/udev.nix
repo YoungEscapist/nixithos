@@ -364,12 +364,20 @@ in
       type = "longrun";
       wantedByDefault = true;
       dependencies = [ "udevd" ];
-      run = ''
-        #!${pkgs.runtimeShell}
-        exec 2>&1
-        live=$(${pkgs.coreutils}/bin/readlink -f /run/s6-rc/compiled)
-        exec ${config.system.build.unitRuntime}/bin/unit-runtime device-watch "''${live%/*}"
-      '';
+      run =
+        if config.nixithos.init == "s6" then
+          ''
+            #!${pkgs.runtimeShell}
+            exec 2>&1
+            live=$(${pkgs.coreutils}/bin/readlink -f /run/s6-rc/compiled)
+            exec ${config.system.build.unitRuntime}/bin/unit-runtime device-watch "''${live%/*}"
+          ''
+        else
+          ''
+            #!${pkgs.runtimeShell}
+            exec 2>&1
+            exec ${config.system.build.unitRuntime}/bin/unit-runtime device-watch /run/units/.db
+          '';
     };
 
     # With systemd, units wait for the device units they need.  s6-rc has no

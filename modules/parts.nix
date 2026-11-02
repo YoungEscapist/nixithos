@@ -103,7 +103,9 @@ let
     ./branding.nix
     ./theme.nix
     ./no-systemd.nix
+    ./init.nix
     ./s6
+    ./dinit
     ./compat/units.nix
     ./compat/base-units.nix
     ./compat/package-units.nix

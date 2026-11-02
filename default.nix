@@ -43,9 +43,18 @@ let
     systemdPackages:
     {
       moduleMode ? false,
+      init ? "s6",
     }:
     let
-      testing = import ./lib/testing.nix { inherit nixpkgs lib systemdPackages moduleMode; };
+      testing = import ./lib/testing.nix {
+        inherit
+          nixpkgs
+          lib
+          systemdPackages
+          moduleMode
+          init
+          ;
+      };
     in
     file:
     testing.runTest {
@@ -64,6 +73,9 @@ let
 
   # ... and the other mode, which compiles the packages without systemd
   runRebuild = runnerFor "rebuild" { };
+
+  # ... and the default mode on the other init system (nixithos.init)
+  runDinit = runnerFor "replace" { init = "dinit"; };
 
   # nixpkgs with `nixos/lib/testing-python.nix` replaced.  Every test of
   # nixos/tests/all-tests.nix goes through it: `runTest` there is its
@@ -168,6 +180,20 @@ in
     # s6.systemdPackages = "rebuild": the same boot, with the packages compiled
     # without systemd (hours on a desktop, so not part of a quick run)
     rebuild = runRebuild ./tests/boot.nix;
+  };
+
+  # The same tests with dinit as init (nixithos.init = "dinit"):
+  #
+  #   nix-build -A dinit.boot
+  dinit = lib.mapAttrs (_: runDinit) {
+    boot = ./tests/boot.nix;
+    units = ./tests/units.nix;
+    switch = ./tests/switch.nix;
+    login = ./tests/login.nix;
+    elogind = ./tests/elogind.nix;
+    user-services = ./tests/user-services.nix;
+    sandbox = ./tests/sandbox.nix;
+    timesync = ./tests/timesync.nix;
   };
 
   # A scratch test for poking at a VM; not part of the suite.

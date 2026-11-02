@@ -1,11 +1,11 @@
 # Adds the steps after the desktop to Calamares's settings.conf: what to log
-# in through, the shell, the boot loader (packagechooser@<id>, each with
-# packagechooser-<id>.conf).
+# in through, the shell, the boot loader, the init system
+# (packagechooser@<id>, each with packagechooser-<id>.conf).
 #
 #   python3 patch-settings.py settings.conf
 import sys
 
-STEPS = ("displaymanager", "shell", "bootloader")
+STEPS = ("displaymanager", "shell", "bootloader", "init")
 
 path = sys.argv[1]
 s = open(path).read()

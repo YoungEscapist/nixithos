@@ -4,8 +4,9 @@
 # (`${config.systemd.package}/bin/systemctl`, `…/example/tmpfiles.d/tmp.conf`)
 # and for feature flags (`config.systemd.package.withLogind`).  This package
 # keeps those references meaningful: it has the same layout, but the files in
-# it are small front-ends for the s6 tooling, and every feature flag that
-# stands for a systemd daemon reports `false`.
+# it are small front-ends for the s6 tooling (or dinit's: the tools find out
+# which of the two runs the machine), and every feature flag that stands for
+# a systemd daemon reports `false`.
 {
   lib,
   runCommand,
@@ -24,7 +25,11 @@
   s6,
   s6-rc,
   s6-linux-init,
+  dinit,
   nixithos,
+
+  # the init system of the configuration (nixithos.init): what `shutdown` is
+  init ? "s6",
 
   # elogind, if there is a login manager: PAM then gets its session module
   # under the name it is looked up by, and `loginctl` exists.
@@ -58,6 +63,7 @@ let
           s6
           s6-rc
           s6-linux-init
+          dinit
           nixithos.unitTools
         ];
         runtime = "${nixithos.unitRuntime}/bin/unit-runtime";
@@ -180,8 +186,31 @@ runCommand "systemd-shim"
     for cmd in halt poweroff reboot; do
       ln -s systemctl $out/bin/$cmd
     done
-    ln -s ${s6-linux-init}/bin/s6-linux-init-shutdown $out/bin/shutdown
-
+    ${
+      if init == "s6" then
+        ''
+          ln -s ${s6-linux-init}/bin/s6-linux-init-shutdown $out/bin/shutdown
+        ''
+      else
+        ''
+          # (sysvinit's spelling, `shutdown -r now`, which dinit's own shutdown
+          # does not take, and through systemctl, which stops the units in
+          # order first)
+          cat > $out/bin/shutdown <<'EOF'
+          #!${runtimeShell}
+          action=poweroff
+          for arg; do
+            case $arg in
+              -r|--reboot) action=reboot ;;
+              -H|--halt) action=halt ;;
+              -c|-k) exit 0 ;;
+            esac
+          done
+          exec "''${0%/*}/systemctl" "$action"
+          EOF
+          chmod +x $out/bin/shutdown
+        ''
+    }
     mkdir -p $out/example/tmpfiles.d
     touch $out/example/sysctl.d/50-default.conf
 

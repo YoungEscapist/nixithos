@@ -12,6 +12,7 @@
   getent,
   s6,
   execline,
+  dinit,
   eudev,
   dbus,
   nixithos,
@@ -46,6 +47,7 @@ replaceVarsWith {
         getent
         s6
         execline
+        dinit
         nixithos.unitTools
         eudev
       ]

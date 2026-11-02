@@ -54,7 +54,7 @@ let
       c=$out/etc/calamares
       substituteInPlace $c/settings.conf --replace-fail "branding: nixos" "branding: nixithos"
       cp ${./packagechooser.conf} $c/modules/packagechooser.conf
-      for step in displaymanager shell bootloader; do
+      for step in displaymanager shell bootloader init; do
         cp ${./.}/packagechooser-$step.conf $c/modules/
       done
       python3 ${./patch-settings.py} $c/settings.conf

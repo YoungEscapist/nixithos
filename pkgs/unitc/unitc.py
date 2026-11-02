@@ -54,6 +54,12 @@ Further points:
     Cycles are broken here, weakest edge first, and reported.
 
 Everything that was ignored or approximated ends up in report.txt.
+
+With --init dinit the same graph becomes service descriptions for dinit
+instead (dinit/, one file per service; see emit_dinit), and the two source
+trees are not written: dinit tells ordering (after) from requirement
+(depends-on, waits-for) itself, so one set of descriptions does for the boot
+and for what comes after it.
 """
 
 import argparse
@@ -72,6 +78,9 @@ SUFFIXES = (
 # Marks a value that is only known on the running system (%H, %m, …).  The
 # name between the two markers is looked up by the runtime.
 RT_OPEN, RT_CLOSE = "", ""
+
+# "s6" or "dinit": the service manager the output is for.
+INIT = "s6"
 
 # "system": the units of the system manager.  "user": those of a user's
 # manager, where %t, %S, %h and friends name that user's directories, which
@@ -431,6 +440,47 @@ def sq(s):
 
 def sh_array(name, values):
     return "%s=(%s)" % (name, " ".join(sq(v) for v in values))
+
+
+# --------------------------------------------------------------------------
+# dinit output
+
+_DINIT_PLAIN = re.compile(r"^[A-Za-z0-9_./:@%+=,-]+$")
+
+
+def dq(word):
+    """Quote one word of a dinit command line.  `$` would be substituted from
+    the environment when the description is loaded, so it is doubled."""
+    word = str(word)
+    if _DINIT_PLAIN.match(word):
+        return word
+    return '"' + word.replace("\\", "\\\\").replace('"', '\\"').replace("$", "$$") + '"'
+
+
+def dcmd(*words):
+    return " ".join(dq(w) for w in words)
+
+
+# dinit allows letters, digits, `.`, `-` and `_` in names, and any byte
+# outside ASCII; `@` separates the argument of a template.  Units have `@`,
+# `\` (escapes) and `:`, so these become characters that look like them.
+DINIT_NAME_CHARS = {"@": "\uff20", "\\": "\u2216", ":": "\ua789"}
+
+
+def dname(atom):
+    """The dinit name of an atom (see names.tsv)."""
+    out = []
+    for ch in atom:
+        if ch.isascii() and not (ch.isalnum() or ch in "._-"):
+            out.append(DINIT_NAME_CHARS.get(ch, "\u2039%02x\u203a" % ord(ch)))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def dsec(ms):
+    """Milliseconds as dinit's seconds (0: no limit)."""
+    return ("%.3f" % (ms / 1000.0)).rstrip("0").rstrip(".")
 
 
 _ENV_NAME = r"[A-Za-z_][A-Za-z0-9_]*"
@@ -1803,8 +1853,32 @@ class Emitter:
             die("unit %s maps to the reserved s6-rc name %r" % (unit, name))
         # deps: everything that must be up first (boot database)
         # hard: the subset that is a real requirement (steady database)
-        self.atoms[name] = {"type": typ, "unit": unit, "deps": set(), "hard": set(), "files": {}}
+        # d: the dinit description (with --init dinit), property -> value;
+        # waits: services it waits for besides its dependencies (its logger)
+        self.atoms[name] = {"type": typ, "unit": unit, "deps": set(), "hard": set(), "files": {},
+                            "d": {}, "waits": set()}
         return self.atoms[name]
+
+    def drt(self, verb, unit, *extra):
+        """A call of the runtime, as a dinit command line."""
+        return dcmd(self.args.runtime, verb, os.path.join(self.args.final_out, "unit-data", unit), *extra)
+
+    def dsv(self, atom, verb, unit, *opts):
+        """A process of the unit run by unit-supervise, as a dinit command line."""
+        return dcmd(self.args.supervise, "-a", atom, *opts, "--",
+                    self.args.runtime, verb, os.path.join(self.args.final_out, "unit-data", unit))
+
+    def dscripted(self, a, up, down=None, start_ms=0, stop_ms=0):
+        a["d"].update({"type": "scripted", "command": up})
+        if down:
+            a["d"]["stop-command"] = down
+        a["d"]["start-timeout"] = dsec(start_ms)
+        a["d"]["stop-timeout"] = dsec(stop_ms)
+
+    def dprocess(self, a, command):
+        """A longrun that only has to be started again whenever it ends
+        (timers, path units, the loops of sockets): unit-supervise does that."""
+        a["d"].update({"type": "process", "command": command, "options": "signal-process-only"})
 
     def require(self, name, dep):
         """A dependency that holds in both databases."""
@@ -1848,6 +1922,8 @@ def emit_units(args, ctx, em):
                     a["files"]["timeout-up"] = ("%d\n" % start_ms, 0o644)
                 if stop_ms:
                     a["files"]["timeout-down"] = ("%d\n" % (stop_ms + 5000), 0o644)
+                em.dscripted(a, em.drt("up", name), em.drt("down", name),
+                             start_ms, (stop_ms + 5000) if stop_ms else 0)
                 u.atoms = [u.atom]
                 u.ready = [u.atom]
             else:
@@ -1866,6 +1942,25 @@ def emit_units(args, ctx, em):
                 a["files"]["timeout-finish"] = ("%d\n" % max(20000, min(stop_ms or 90000, 90000)), 0o644)
                 sig = parse_signal(u.get("KillSignal", "TERM")) or "TERM"
                 a["files"]["down-signal"] = ("SIG%s\n" % sig, 0o644)
+                # dinit: unit-supervise is the process, and does for the unit
+                # what s6-supervise does with the files above (./finish,
+                # down-signal, timeout-kill, timeout-finish); ExecStop= is its
+                # -h rather than an atom of its own
+                kill_ms = stop_ms if stop_ms and parse_bool(u.get("SendSIGKILL"), True) else 0
+                finish_ms = max(20000, min(stop_ms or 90000, 90000))
+                opts = ["-n", str(args.notification_fd), "-s", sig, "-k", str(kill_ms), "-f", str(finish_ms)]
+                if u.all("ExecStop"):
+                    opts.append("-h")
+                a["d"].update({
+                    "type": "process",
+                    "command": em.dsv(u.atom, "run", name, *opts),
+                    "ready-notification": "pipefd:%d" % args.notification_fd,
+                    "start-timeout": dsec(start_ms),
+                    # (it gives up on the process itself; this is for a
+                    # supervisor that does not come back)
+                    "stop-timeout": dsec((stop_ms + finish_ms + 10000) if kill_ms else 0),
+                    "options": "signal-process-only",
+                })
                 u.atoms = [u.atom]
                 u.ready = [u.atom]
                 if u.get("StandardOutput", "journal") not in ("null", "tty") or u.get("StandardError", "inherit") not in ("null", "tty"):
@@ -1875,8 +1970,21 @@ def emit_units(args, ctx, em):
                     log["files"]["notification-fd"] = ("3\n", 0o644)
                     log["files"]["run"] = (
                         "#!%s\nexec %s log %s\n" % (bash, sq(args.runtime), sq(u.atom)), 0o755)
+                    # dinit keeps the pipe between the two; the logger is
+                    # started first (output would wait in the pipe for it
+                    # otherwise) and stopped last
+                    a["d"]["log-type"] = "pipe"
+                    a["waits"].add(u.atom + "-log")
+                    log["d"].update({
+                        "type": "process",
+                        "command": dcmd(args.runtime, "log", u.atom),
+                        "consumer-of": u.atom,
+                        "ready-notification": "pipefd:3",
+                        "restart": "true",
+                        "smooth-recovery": "true",
+                    })
                     u.atoms.append(u.atom + "-log")
-                if u.all("ExecStop"):
+                if u.all("ExecStop") and INIT == "s6":
                     hooks = em.add_atom(u.atom + "-hooks", "oneshot", name)
                     hooks["files"]["up"] = ("", 0o644)
                     hooks["files"]["down"] = (em.runtime("stop-hook", name) + "\n", 0o644)
@@ -1891,18 +1999,21 @@ def emit_units(args, ctx, em):
             write(em.data_path(name), emit_target(u, ctx))
             a = em.add_atom(u.atom, "oneshot", name)
             a["files"]["up"] = (em.runtime("target-up", name) + "\n", 0o644)
+            em.dscripted(a, em.drt("target-up", name))
             u.atoms = u.ready = [u.atom]
         elif kind in ("mount", "swap"):
             write(em.data_path(name), emit_mount(u, ctx) if kind == "mount" else emit_swap(u, ctx))
             a = em.add_atom(u.atom, "oneshot", name)
             a["files"]["up"] = (em.runtime(kind + "-up", name) + "\n", 0o644)
             a["files"]["down"] = (em.runtime(kind + "-down", name) + "\n", 0o644)
+            em.dscripted(a, em.drt(kind + "-up", name), em.drt(kind + "-down", name))
             u.atoms = u.ready = [u.atom]
         elif kind == "socket":
             write(em.data_path(name), emit_socket(u, ctx))
             a = em.add_atom(u.atom, "oneshot", name)
             a["files"]["up"] = (em.runtime("socket-up", name) + "\n", 0o644)
             a["files"]["down"] = (em.runtime("socket-down", name) + "\n", 0o644)
+            em.dscripted(a, em.drt("socket-up", name), em.drt("socket-down", name))
             em.require(u.atom, args.fdholder)
             u.atoms = u.ready = [u.atom]
             if accepts(u):
@@ -1911,6 +2022,7 @@ def emit_units(args, ctx, em):
                 data = os.path.join(args.final_out, "unit-data", name)
                 acc["files"]["run"] = (
                     "#!%s\nexec %s accept-loop %s\n" % (bash, sq(args.runtime), sq(data)), 0o755)
+                em.dprocess(acc, em.dsv(u.atom + "-accept", "accept-loop", name))
                 em.require(u.atom + "-accept", u.atom)
                 u.atoms.append(u.atom + "-accept")
             else:
@@ -1922,6 +2034,7 @@ def emit_units(args, ctx, em):
                     data = os.path.join(args.final_out, "unit-data", name)
                     act["files"]["run"] = (
                         "#!%s\nexec %s socket-activate %s\n" % (bash, sq(args.runtime), sq(data)), 0o755)
+                    em.dprocess(act, em.dsv(u.atom + "-activate", "socket-activate", name))
                     em.require(u.atom + "-activate", u.atom)
                     u.atoms.append(u.atom + "-activate")
         elif kind == "device":
@@ -1949,6 +2062,7 @@ def emit_units(args, ctx, em):
                     em.require(u.atom, settle.atom)
             a["files"]["up"] = (
                 " ".join(exl_quote(w) for w in [args.runtime, "device", name, path, str(tmo), hard]) + "\n", 0o644)
+            em.dscripted(a, dcmd(args.runtime, "device", name, path, str(tmo), hard))
             u.atoms = u.ready = [u.atom]
         elif kind == "path":
             svc = path_service(u, ctx.loader)
@@ -1968,6 +2082,7 @@ def emit_units(args, ctx, em):
             a = em.add_atom(u.atom, "longrun", name)
             data = os.path.join(args.final_out, "unit-data", name)
             a["files"]["run"] = ("#!%s\nexec %s path %s\n" % (bash, sq(args.runtime), sq(data)), 0o755)
+            em.dprocess(a, em.dsv(u.atom, "path", name))
             u.atoms = u.ready = [u.atom]
         elif kind == "timer":
             svc = timer_service(u, ctx.loader)
@@ -1990,6 +2105,7 @@ def emit_units(args, ctx, em):
             a = em.add_atom(u.atom, "longrun", name)
             data = os.path.join(args.final_out, "unit-data", name)
             a["files"]["run"] = ("#!%s\nexec %s timer %s\n" % (bash, sq(args.runtime), sq(data)), 0o755)
+            em.dprocess(a, em.dsv(u.atom, "timer", name))
             u.atoms = u.ready = [u.atom]
 
 
@@ -2007,7 +2123,124 @@ def emit_native(path, em):
             em.require(name, dep)
         if svc["type"] == "bundle":
             a["contents"] = list(svc.get("contents", []))
+        if INIT == "dinit":
+            native_dinit(em, name, a)
     return list(spec.get("default", []))
+
+
+def native_dinit(em, name, a):
+    """The dinit description of a native service: its files go to native/NAME
+    (the directory it runs in, as a service directory of s6 is), and what
+    s6-supervise or s6-rc would make of them goes to the description."""
+    args = em.args
+    files = a["files"]
+    here = os.path.join(args.final_out, "native", name)
+    for fname, (text, mode) in files.items():
+        write(os.path.join(args.out, "native", name, fname), text, mode)
+
+    def ms(fname):
+        try:
+            return int(files[fname][0].strip()) if fname in files else 0
+        except ValueError:
+            return 0
+
+    if a["type"] == "longrun":
+        a["d"].update({
+            "type": "process",
+            "command": dq(os.path.join(here, "run")),
+            "working-dir": here,
+            "restart": "true",
+            "smooth-recovery": "true",
+            "start-timeout": dsec(ms("timeout-up")),
+            "stop-timeout": dsec(ms("timeout-down")),
+        })
+        if "notification-fd" in files:
+            a["d"]["ready-notification"] = "pipefd:%d" % ms("notification-fd")
+    elif a["type"] == "oneshot":
+        if not args.execlineb:
+            die("native oneshot %s needs --execlineb" % name)
+        a["d"].update({"working-dir": here})
+        em.dscripted(a, dcmd(args.execlineb, "-P", os.path.join(here, "up")),
+                     dcmd(args.execlineb, "-P", os.path.join(here, "down")) if "down" in files else None,
+                     ms("timeout-up"), ms("timeout-down"))
+    else:
+        # a bundle: what it stands for comes up with it
+        a["d"]["type"] = "internal"
+        for member in a.get("contents", ()):
+            em.require(name, member)
+
+
+# The order of the properties in a description (the rest come after, sorted).
+DINIT_ORDER = (
+    "type", "command", "stop-command", "working-dir", "ready-notification",
+    "consumer-of", "log-type", "logfile", "restart", "smooth-recovery",
+    "start-timeout", "stop-timeout", "options",
+)
+
+
+def emit_dinit(args, ctx, em, boot_atoms):
+    """dinit/: one description per service.
+
+    The kinds of edge are told apart here, which the two databases of s6-rc
+    could not: a requirement (Requires=, BindsTo=, and the atoms of one unit
+    among themselves) is depends-on, a Wants= is waits-for, and an ordering
+    alone (After=, Before=, and the implicit ones) is after, which dinit only
+    applies between services that are starting anyway, as systemd does.
+    Besides the services of the units there are two:
+
+      default   what systemd starts for default.target (the "default" bundle
+                of s6-rc): it waits for each of them
+      boot      what dinit starts; once default is up it says that the boot
+                is over (/run/units/.booting goes)
+    """
+    out = os.path.join(args.out, "dinit")
+    os.makedirs(out, exist_ok=True)
+    for reserved in ("boot", "default"):
+        if reserved in em.atoms:
+            die("unit %s maps to the reserved dinit name %r" % (em.atoms[reserved]["unit"], reserved))
+
+    def description(comment, props, deps):
+        props = dict(props)
+        props.setdefault("restart", "false")
+        if props["type"] != "internal":
+            props.setdefault("working-dir", "/")
+            if "log-type" not in props and "logfile" not in props:
+                props["logfile"] = args.catchall_log
+        if "consumer-of" in props:
+            props["consumer-of"] = dname(props["consumer-of"])
+        lines = ["# %s" % comment]
+        for k in list(DINIT_ORDER) + sorted(set(props) - set(DINIT_ORDER)):
+            if k in props and props[k] != "":
+                lines.append("%s = %s" % (k, props[k]))
+        lines.extend("%s: %s" % (kind, dname(dep)) for kind, dep in deps)
+        return "\n".join(lines) + "\n"
+
+    for name, a in sorted(em.atoms.items()):
+        if not a["d"]:
+            die("no dinit description for %s (unit %s)" % (name, a["unit"]))
+        deps = []
+        for dep in sorted(a["deps"]):
+            if dep not in em.atoms:
+                die("%s depends on %s, which does not exist" % (name, dep))
+            if dep in a["hard"]:
+                deps.append(("depends-on", dep))
+            elif ctx.edge_strength.get((name, dep), 0) == 2:
+                deps.append(("waits-for", dep))
+            else:
+                deps.append(("after", dep))
+        deps.extend(("waits-for", w) for w in sorted(a["waits"] - a["deps"]))
+        write(os.path.join(out, dname(name)), description(a["unit"], a["d"], deps))
+
+    # names.tsv: atom -> dinit name, for the tools on the running system
+    write(os.path.join(args.out, "names.tsv"),
+          "".join("%s\t%s\n" % (a, dname(a)) for a in sorted(em.atoms)))
+
+    write(os.path.join(out, "default"), description(
+        "everything systemd would start for default.target",
+        {"type": "internal"}, [("waits-for", a) for a in boot_atoms]))
+    write(os.path.join(out, "boot"), description(
+        "the boot: once default is up, it is over",
+        {"type": "scripted", "command": dcmd(args.runtime, "booted")}, [("waits-for", "default")]))
 
 
 def break_cycles(ctx, em):
@@ -2070,10 +2303,19 @@ def main():
     ap.add_argument("--scope", choices=("system", "user"), default="system",
                     help="whose units these are")
     ap.add_argument("--strict", action="store_true", help="fail on unknown references")
+    ap.add_argument("--init", choices=("s6", "dinit"), default="s6",
+                    help="the service manager to write for")
+    ap.add_argument("--supervise", help="(dinit) path of unit-supervise")
+    ap.add_argument("--execlineb", help="(dinit) execlineb, for native oneshots")
+    ap.add_argument("--catchall-log", default="/run/uncaught-logs/dinit",
+                    help="(dinit) where the output of services without a logger of their own goes")
     args = ap.parse_args()
     args.final_out = args.final_out or args.out
-    global SCOPE
+    global SCOPE, INIT
     SCOPE = args.scope
+    INIT = args.init
+    if INIT == "dinit" and not args.supervise:
+        die("--init dinit needs --supervise")
 
     report = Report()
     loader = Loader(args.units, report)
@@ -2194,17 +2436,19 @@ def main():
         if a not in rank:
             rank_of(a)
 
-    em.flush(os.path.join(args.out, "source-boot"), "deps")
-    em.flush(os.path.join(args.out, "source"), "hard")
-
     # the "default" bundle: everything systemd would start for default.target
     boot_atoms = sorted({a for n in boot for a in units[n].atoms} | set(native_default))
-    for tree in ("source-boot", "source"):
-        bd = os.path.join(args.out, tree, "default")
-        os.makedirs(os.path.join(bd, "contents.d"))
-        write(os.path.join(bd, "type"), "bundle\n")
-        for a in boot_atoms:
-            write(os.path.join(bd, "contents.d", a), "")
+    if INIT == "dinit":
+        emit_dinit(args, ctx, em, boot_atoms)
+    else:
+        em.flush(os.path.join(args.out, "source-boot"), "deps")
+        em.flush(os.path.join(args.out, "source"), "hard")
+        for tree in ("source-boot", "source"):
+            bd = os.path.join(args.out, tree, "default")
+            os.makedirs(os.path.join(bd, "contents.d"))
+            write(os.path.join(bd, "type"), "bundle\n")
+            for a in boot_atoms:
+                write(os.path.join(bd, "contents.d", a), "")
 
     # index.tsv: what the tools on the running system need to know, in a form
     # a shell can read.  One line per unit:
@@ -2301,8 +2545,8 @@ def main():
 
     n_atoms = len(em.atoms)
     sys.stderr.write(
-        "unitc: %d units -> %d s6-rc services (%d in the default bundle); %d units with notes, see report.txt\n"
-        % (len(units), n_atoms, len(boot_atoms), len(report.items)))
+        "unitc: %d units -> %d %s services (%d in the default bundle); %d units with notes, see report.txt\n"
+        % (len(units), n_atoms, "dinit" if INIT == "dinit" else "s6-rc", len(boot_atoms), len(report.items)))
 
 
 if __name__ == "__main__":

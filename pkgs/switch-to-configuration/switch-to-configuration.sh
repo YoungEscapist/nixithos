@@ -15,6 +15,13 @@
 #      longer exists and restarts what we tell it has changed;
 #   4. start what is new, reload what asked to be reloaded.
 # Units that did not change are not touched.
+#
+# Under dinit, 3. is: /run/units/.db is pointed at the new database (the
+# services refer to everything through it), the services dinit has loaded
+# whose descriptions changed are read again (dinitctl reload), those that
+# are gone are unloaded, and what changed is restarted.  A configuration for
+# the other init system than the one that runs is only activated: its
+# services take over at the next boot.
 
 PATH=@path@:$PATH
 RUNTIME=@runtime@
@@ -59,8 +66,21 @@ fi
 [[ $action == boot ]] && exit 0
 
 new_db=$(readlink -f "$toplevel/s6-db")
-live=$(readlink -f /run/s6-rc/compiled 2>/dev/null) || live=
-old_db=${live%/*}
+
+# the init system that runs, and the one of the new configuration
+running_init=s6
+[[ -L $STATE/.db && ! -e /run/s6-rc/compiled ]] && running_init=dinit
+new_init=s6
+[[ -d $new_db/dinit ]] && new_init=dinit
+DINITCTL=(dinitctl -p /run/dinitctl)
+
+if [[ $running_init == dinit ]]; then
+  live=$(readlink -f "$STATE/.db" 2>/dev/null) || live=
+  old_db=$live
+else
+  live=$(readlink -f /run/s6-rc/compiled 2>/dev/null) || live=
+  old_db=${live%/*}
+fi
 
 if [[ -z $live || ! -r $old_db/switch.tsv ]]; then
   # Not running on s6-rc (a chroot, an installer): there is nothing to
@@ -69,6 +89,30 @@ if [[ -z $live || ! -r $old_db/switch.tsv ]]; then
   echo "activating the configuration..."
   exec "$toplevel/activate" "$toplevel"
 fi
+
+if [[ $running_init != "$new_init" ]]; then
+  # What runs stays as it is: the new init system and its services take over
+  # at the next boot.  The rest of the configuration is laid down now.
+  echo "the new configuration is for $new_init, and $running_init runs this machine: its services change over at the next boot" >&2
+  if [[ $action == dry-activate ]]; then exec "$toplevel/dry-activate" "$toplevel"; fi
+  echo "activating the configuration..."
+  exec "$toplevel/activate" "$toplevel"
+fi
+
+# (dinit) DN: the name dinit knows atom $1 by (see unitc's dname)
+dname() {
+  DN=${1//@/＠}
+  DN=${DN//\\/∖}
+  DN=${DN//:/꞉}
+}
+
+# (dinit) Is the process of a longrun running?  (unit-supervise's status)
+sv_running() {
+  local u= _ sv=
+  [[ -r $STATE/.sv/$1 ]] || return 1
+  read -r u _ _ _ sv _ < "$STATE/.sv/$1"
+  [[ $u == 1 ]] && kill -0 "$sv" 2>/dev/null
+}
 
 # --------------------------------------------------------------------------
 # what changed
@@ -100,9 +144,21 @@ is_run_once() {
 
 # (another transaction may be going on, a unit starting its dependencies:
 # the lock is waited for, as systemd queues a job behind the running ones)
-up=$(s6-rc -b -a list 2>/dev/null) || { echo "s6-rc is not answering" >&2; exit 1; }
-up=" ${up//$'\n'/ } "
-is_up() { [[ $up == *" $1 "* ]]; }
+if [[ $running_init == dinit ]]; then
+  # what dinit has started ("[{+}     ] name …"), by dinit name
+  listing=$("${DINITCTL[@]}" list 2>/dev/null) || { echo "dinit is not answering" >&2; exit 1; }
+  up=" "
+  while IFS= read -r line; do
+    [[ ${line:2:1} == [+s] ]] || continue
+    line=${line:11}
+    up+="${line%% *} "
+  done <<< "$listing"
+  is_up() { dname "$1"; [[ $up == *" $DN "* ]]; }
+else
+  up=$(s6-rc -b -a list 2>/dev/null) || { echo "s6-rc is not answering" >&2; exit 1; }
+  up=" ${up//$'\n'/ } "
+  is_up() { [[ $up == *" $1 "* ]]; }
+fi
 
 # Is the unit doing something right now?  (A oneshot that has run and is
 # done counts, as long as it "remains after exit".)
@@ -111,6 +167,10 @@ is_active() {
   atom=${OLD_ATOMS[$unit]%% *}
   [[ -n $atom ]] || return 1
   is_up "$atom" || return 1
+  if [[ $running_init == dinit && -r $STATE/.sv/$atom ]]; then
+    sv_running "$atom"
+    return
+  fi
   if [[ -d $SCAN/$atom ]]; then
     [[ $(s6-svstat -o up "$SCAN/$atom" 2>/dev/null) == true ]]
     return
@@ -178,7 +238,18 @@ rc=0
 if (( ${#removed[@]} + ${#stop_start[@]} )); then
   echo "stopping the following units: $(list $(sorted "${removed[@]}" "${stop_start[@]}"))"
 fi
-for unit in ${stop_start[@]+"${stop_start[@]}"}; do
+if [[ $running_init == dinit ]]; then
+  # (with what requires them: they come back with the targets at the end; the
+  # units that are gone are stopped here too, as systemd does)
+  for unit in ${stop_start[@]+"${stop_start[@]}"} ${removed[@]+"${removed[@]}"}; do
+    dname "${OLD_ATOMS[$unit]%% *}"
+    "${DINITCTL[@]}" --quiet stop --force --ignore-unstarted "$DN"
+  done
+  stop_start_s6=()
+else
+  stop_start_s6=(${stop_start[@]+"${stop_start[@]}"})
+fi
+for unit in ${stop_start_s6[@]+"${stop_start_s6[@]}"}; do
   atom=${OLD_ATOMS[$unit]%% *}
   if [[ -d $SCAN/$atom ]]; then
     [[ " ${OLD_ATOMS[$unit]} " == *" $atom-hooks "* ]] && "$RUNTIME" stop-hook "$old_db/unit-data/$unit"
@@ -216,7 +287,41 @@ done
 (( ${#restart[@]} + ${#rerun[@]} )) && echo "restarting the following units: $(list $(sorted ${restart[@]+"${restart[@]}"} ${rerun[@]+"${rerun[@]}"}))"
 (( ${#start[@]} + ${#stop_start[@]} )) && echo "starting the following units: $(list $(sorted ${start[@]+"${start[@]}"} ${stop_start[@]+"${stop_start[@]}"}))"
 
-if [[ $new_db != "$old_db" ]]; then
+if [[ $running_init == dinit ]]; then
+  if [[ $new_db != "$old_db" ]]; then
+    ln -sfn "$new_db" "$STATE/.db"
+    ln -sfn "$new_db" /nix/var/nix/gcroots/units-live 2>/dev/null
+    # What dinit has loaded and is described differently now is read again;
+    # what is gone is unloaded once nothing refers to it any more.
+    gone=()
+    while IFS= read -r line; do
+      line=${line:11}
+      name=${line%% *}
+      [[ -n $name ]] || continue
+      if [[ ! -e $new_db/dinit/$name ]]; then gone+=("$name"); continue; fi
+      cmp -s "$old_db/dinit/$name" "$new_db/dinit/$name" && continue
+      if ! "${DINITCTL[@]}" --quiet reload "$name" 2>/dev/null; then
+        # (a running service that cannot take the change - another kind of
+        # service, a requirement that is not up - is stopped first; the
+        # targets bring it back at the end)
+        "${DINITCTL[@]}" --quiet stop --force --ignore-unstarted "$name"
+        "${DINITCTL[@]}" --quiet reload "$name" || { echo "warning: dinit cannot read $name again" >&2; rc=4; }
+      fi
+    done <<< "$("${DINITCTL[@]}" list 2>/dev/null)"
+    for name in ${gone[@]+"${gone[@]}"}; do
+      "${DINITCTL[@]}" --quiet stop --force --ignore-unstarted "$name"
+      "${DINITCTL[@]}" --quiet unload "$name" 2>/dev/null
+    done
+  fi
+  for unit in ${restart[@]+"${restart[@]}"}; do
+    dname "${NEW_ATOMS[$unit]%% *}"
+    if is_up "${NEW_ATOMS[$unit]%% *}"; then
+      "${DINITCTL[@]}" --quiet restart --force "$DN" || rc=4
+    else
+      "${DINITCTL[@]}" --quiet start "$DN" || rc=4
+    fi
+  done
+elif [[ $new_db != "$old_db" ]]; then
   s6-rc-update -b -v1 -f "$conv" "$new_db/compiled"
   code=$?
   case $code in
@@ -237,6 +342,16 @@ rm -f "$conv"
 # --------------------------------------------------------------------------
 # 4. start what is new (in the order ranks give), reload what asked for it
 
+if [[ $running_init == dinit ]]; then
+  # (each with what it requires, in the order of their ranks)
+  while read -r _ unit; do
+    dname "${NEW_ATOMS[$unit]%% *}"
+    "${DINITCTL[@]}" --quiet start "$DN" || rc=4
+  done < <(for unit in ${start[@]+"${start[@]}"} ${stop_start[@]+"${stop_start[@]}"}; do
+             printf '%s %s\n' "${NEW_UNIT_RANK[$unit]}" "$unit"
+           done | sort -n)
+  start_atoms=()
+fi
 if (( ${#start_atoms[@]} )); then
   now_up=" $(s6-rc -b -a list | tr '\n' ' ') "
   prev= batch=()

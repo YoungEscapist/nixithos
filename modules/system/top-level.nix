@@ -27,7 +27,7 @@ let
     ln -s ${config.system.path} $out/sw
     ln -s "$systemd" $out/systemd
 
-    echo -n "s6-rc ${toString config.systemd.package.interfaceVersion}" > $out/init-interface-version
+    echo -n "${if config.nixithos.init == "s6" then "s6-rc" else "dinit"} ${toString config.systemd.package.interfaceVersion}" > $out/init-interface-version
     echo -n "$nixosLabel" > $out/nixos-version
     echo -n "${config.boot.kernelPackages.stdenv.hostPlatform.system}" > $out/system
 

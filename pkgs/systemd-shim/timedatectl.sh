@@ -44,7 +44,13 @@ synchronized() {
 }
 
 ntp_active() {
-  if s6-svstat /run/service/timesyncd 2>/dev/null | grep -q '^up'; then echo yes; else echo no; fi
+  local up= _ sv
+  if [[ -r /run/units/.sv/timesyncd ]]; then
+    # (dinit: what unit-supervise says, if it is still there)
+    read -r up _ _ _ sv _ < /run/units/.sv/timesyncd
+    [[ $up == 1 ]] && kill -0 "$sv" 2>/dev/null && { echo yes; return; }
+    echo no
+  elif s6-svstat /run/service/timesyncd 2>/dev/null | grep -q '^up'; then echo yes; else echo no; fi
 }
 
 show() {

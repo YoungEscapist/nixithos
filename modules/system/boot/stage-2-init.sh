@@ -189,13 +189,16 @@ if [ "${IN_NIXOS_SYSTEMD_STAGE1:-}" != true ]; then
 
     # s6-linux-init copies its run image, which is kept in the Nix store, over
     # /run.  The store cannot hold FIFOs, so the two that belong in that image
-    # are created here.
-    install -m 0755 -d /run/service/s6-svscan-log /run/service/s6-linux-init-shutdownd
-    for fifo in /run/service/s6-svscan-log/fifo /run/service/s6-linux-init-shutdownd/fifo; do
-        [ -p "$fifo" ] || mkfifo -m 0600 "$fifo"
-    done
+    # are created here.  (dinit has no run image.)
+    if [ -d @initBase@/run-image ]; then
+        install -m 0755 -d /run/service/s6-svscan-log /run/service/s6-linux-init-shutdownd
+        for fifo in /run/service/s6-svscan-log/fifo /run/service/s6-linux-init-shutdownd/fifo; do
+            [ -p "$fifo" ] || mkfifo -m 0600 "$fifo"
+        done
+    fi
 
-    # Hand over to s6-linux-init.  It drops this environment itself.
-    echo "starting s6-linux-init..."
+    # Hand over to the init system (s6-linux-init, or dinit through its
+    # `init`).  It drops this environment itself.
+    echo "starting @initName@..."
     exec @initBase@/bin/init "$@"
 fi

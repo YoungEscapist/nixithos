@@ -100,7 +100,10 @@
       };
     };
 
-  testScript = ''
+  testScript =
+    { nodes, ... }:
+    ''
+    init = "${nodes.machine.nixithos.init}"
     machine.start()
     machine.wait_for_unit("multi-user.target")
 
@@ -127,7 +130,10 @@
     with subtest("switch"):
         print(machine.succeed("/run/current-system/specialisation/next/bin/switch-to-configuration test 2>&1"))
         machine.succeed("test \"$(cat /etc/t-file)\" = v2")
-        machine.succeed("test \"$(readlink -f /run/s6-rc/compiled)\" = \"$(readlink -f /run/current-system/s6-db)/compiled\"")
+        if init == "dinit":
+            machine.succeed("test \"$(readlink -f /run/units/.db)\" = \"$(readlink -f /run/current-system/s6-db)\"")
+        else:
+            machine.succeed("test \"$(readlink -f /run/s6-rc/compiled)\" = \"$(readlink -f /run/current-system/s6-db)/compiled\"")
 
     with subtest("changed units were restarted"):
         assert version("t-change") == "v2"

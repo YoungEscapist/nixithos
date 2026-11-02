@@ -1,5 +1,5 @@
 #!@bash@
-# unit-runtime - runs one compiled unit under s6.
+# unit-runtime - runs one compiled unit under s6 or dinit.
 #
 # unitc turns every systemd unit into a small data file (shell variables and
 # functions) plus s6-rc service definitions whose scripts are one-liners
@@ -17,6 +17,10 @@
 #   unit-runtime timer      DATA
 #   unit-runtime device-watch DBDIR       start units as devices appear
 #   unit-runtime log        NAME          the per-service logger
+#   unit-runtime booted                   (dinit) the boot is over
+#
+# Under dinit, the longrun's ./run and ./finish are run by unit-supervise,
+# with the same contract as s6-supervise's (see unit-supervise.c).
 #
 # It implements the part of systemd.exec(5)/systemd.service(5) that is about
 # starting a process in the right context: environment, credentials,
@@ -72,7 +76,7 @@ else
     unset -f $(compgen -A function)
     for __v in $(compgen -e); do
       case $__v in
-        UNIT_ACCEPT_INSTANCE|REMOTE_ADDR|REMOTE_PORT) ;;
+        UNIT_ACCEPT_INSTANCE|REMOTE_ADDR|REMOTE_PORT|UNIT_SV_WANT) ;;
         *) unset -v "$__v" 2>/dev/null || export -n "$__v" ;;
       esac
     done
@@ -80,7 +84,7 @@ else
   elif [[ ${__UNIT_RT_CLEAN-} != 1 ]]; then
     # (a bash without programmable completion: start again, empty-handed)
     keep=()
-    for v in UNIT_ACCEPT_INSTANCE REMOTE_ADDR REMOTE_PORT; do
+    for v in UNIT_ACCEPT_INSTANCE REMOTE_ADDR REMOTE_PORT UNIT_SV_WANT; do
       [[ -n ${!v-} ]] && keep+=("$v=${!v}")
     done
     exec @env@ -i __UNIT_RT_CLEAN=1 ${keep[@]+"${keep[@]}"} "$BASH" "$0" "$@"
@@ -156,6 +160,10 @@ else
   RT_CREDS=/run/credentials
 fi
 RT_FDHOLDER=$RT_STATE/.fdholder
+# The service manager: s6, or dinit (whose init points /run/units/.db at the
+# unit database; the managers of users are s6 either way).
+RT_INIT=s6
+[[ $scope == system && -L /run/units/.db ]] && RT_INIT=dinit
 RT_CONSOLE=
 if [[ $scope == system && -r /etc/units/console-log ]]; then
   read -r RT_CONSOLE < /etc/units/console-log
@@ -166,6 +174,52 @@ U_UNIT=unit-runtime
 
 msg()  { printf '%s: %s\n' "$U_UNIT" "$*" >&2; }
 warn() { printf '%s: warning: %s\n' "$U_UNIT" "$*" >&2; }
+
+# --------------------------------------------------------------------------
+# the supervisor of a longrun: s6-supervise, or unit-supervise under dinit
+
+# sv_status ATOM: what unit-supervise says about it, in sv_up, sv_ready,
+# sv_pid and sv_svpid; 1 if no supervisor is there for it
+sv_status() {
+  local want
+  sv_up=0 sv_ready=0 sv_pid= sv_svpid= sv_phase=
+  [[ -r $RT_STATE/.sv/$1 ]] || return 1
+  read -r sv_up sv_ready sv_pid want sv_svpid sv_phase < "$RT_STATE/.sv/$1" || return 1
+  [[ $sv_pid == -1 ]] && sv_pid=
+  if [[ $sv_phase == exit ]] || ! kill -0 "$sv_svpid" 2>/dev/null; then
+    sv_up=0 sv_ready=0 sv_pid=
+    return 1
+  fi
+  return 0
+}
+
+# Is the process of ATOM running?
+rt_up() {
+  if [[ $RT_INIT == dinit ]]; then
+    sv_status "$1" && (( sv_up ))
+  else
+    [[ $(s6-svstat -o up "$RT_SCANDIR/$1" 2>/dev/null) == true ]]
+  fi
+}
+
+# The process of ATOM, or nothing
+rt_pid() {
+  if [[ $RT_INIT == dinit ]]; then
+    sv_status "$1" && printf '%s' "$sv_pid"
+  else
+    s6-svstat -o pid "$RT_SCANDIR/$1" 2>/dev/null
+  fi
+  return 0
+}
+
+# The name dinit knows ATOM by (unitc's dname: `@`, `\`, `:` are not allowed)
+dinit_name() {
+  local n=$1
+  n=${n//@/＠}
+  n=${n//\\/∖}
+  n=${n//:/꞉}
+  printf '%s' "$n"
+}
 
 # --------------------------------------------------------------------------
 # loading
@@ -1429,7 +1483,14 @@ cmd_finish() {
     requested=1
     rm -f "$sd/restart-requested"
   fi
-  wanted=$(s6-svstat -o wantedup . 2>/dev/null) || wanted=true
+  if [[ $RT_INIT == dinit ]]; then
+    # (unit-supervise says whether the service is wanted up)
+    wanted=true
+    [[ ${UNIT_SV_WANT-up} == down ]] && wanted=false
+    unset UNIT_SV_WANT
+  else
+    wanted=$(s6-svstat -o wantedup . 2>/dev/null) || wanted=true
+  fi
   printf '%s %s %s\n' "$code" "$signum" "$result" > "$sd/exit"
 
   if [[ $(< "$sd/state") != inactive || ! -e $sd/result || $(< "$sd/result") != condition ]]; then
@@ -1445,6 +1506,9 @@ cmd_finish() {
     rm -f "$RT_STATE/.on-console/$U_UNIT"
     rm -f "$sd/notify" "$sd/ready" "$sd/mainpid"
   else
+    # (skipped by a condition: s6-svc -O has told s6-supervise not to start
+    # it again; unit-supervise hears it from here)
+    [[ $RT_INIT == dinit ]] && exit 125
     exit 0
   fi
 
@@ -1513,7 +1577,7 @@ cmd_finish() {
   fi
   rm -f "$sd/starts"
   rmdir "$cg" 2>/dev/null
-  # 125: tell s6-supervise not to start it again.
+  # 125: tell s6-supervise (or unit-supervise) not to start it again.
   exit 125
 }
 
@@ -1654,6 +1718,16 @@ cmd_job() {
     # A service that stays up (what a timer or a path unit points at, as
     # keepalived's boot delay does): the trigger starts it like
     # `systemctl start`, with what it needs; it is not run to completion here.
+    if [[ $RT_INIT == dinit ]]; then
+      dinitctl -p /run/dinitctl --quiet start "$(dinit_name "$U_ATOM")" || true
+      # (started as far as dinit knows, but it ran to completion, failed, or
+      # was stopped by hand: its supervisor starts it again)
+      if ! rt_up "$U_ATOM" && sv_status "$U_ATOM"; then
+        rm -f "$sd/starts"
+        kill -USR1 "$sv_svpid"
+      fi
+      exit 0
+    fi
     local live=/run/s6-rc
     [[ $scope == user ]] && live=${UNIT_USER_STATE:-$XDG_RUNTIME_DIR}/s6-rc
     s6-rc -l "$live" -b -u change "$U_ATOM" || true
@@ -1671,7 +1745,7 @@ cmd_job() {
     msg "still running, not starting it again"
     exit 0
   fi
-  if [[ $U_TYPE != oneshot ]] && s6-svstat -o up "$RT_SCANDIR/$U_ATOM" 2>/dev/null | grep -q true; then
+  if [[ $U_TYPE != oneshot ]] && rt_up "$U_ATOM"; then
     msg "already active"
     exit 0
   fi
@@ -1687,7 +1761,7 @@ cmd_stop_hook() {
   load "$1"
   exec 2>&1
   local pid
-  pid=$(s6-svstat -o pid "$RT_SCANDIR/$U_ATOM" 2>/dev/null) || pid=
+  pid=$(rt_pid "$U_ATOM")
   [[ -r $sd/mainpid ]] && pid=$(< "$sd/mainpid")
   [[ $pid == -1 ]] && pid=
   [[ -n $pid ]] || exit 0
@@ -1700,7 +1774,7 @@ cmd_stop_hook() {
 cmd_reload() {
   load "$1"
   local pid
-  pid=$(s6-svstat -o pid "$RT_SCANDIR/$U_ATOM" 2>/dev/null) || pid=
+  pid=$(rt_pid "$U_ATOM")
   [[ -r $sd/mainpid ]] && pid=$(< "$sd/mainpid")
   [[ $pid == -1 ]] && pid=
   if (( ${U_N_RELOAD:-0} == 0 )); then
@@ -1884,7 +1958,10 @@ cmd_socket_up() {
     # sockets, while what waits on them for the service (the -activate atom,
     # cmd_socket_activate) still holds the old ones: whatever came on the new
     # ones queued up and the service was never started.  It takes them again.
-    if [[ -d $RT_SCANDIR/$U_ATOM-activate ]] &&
+    if [[ $RT_INIT == dinit ]]; then
+      # (unit-supervise: HUP stops the process, which it then starts again)
+      if sv_status "$U_ATOM-activate" && (( sv_up )); then kill -HUP "$sv_svpid"; fi
+    elif [[ -d $RT_SCANDIR/$U_ATOM-activate ]] &&
         [[ $(s6-svstat -o up "$RT_SCANDIR/$U_ATOM-activate" 2>/dev/null) == true ]]; then
       s6-svc -K "$RT_SCANDIR/$U_ATOM-activate"
     fi
@@ -2048,6 +2125,13 @@ cmd_target_up() {
   jlog "Reached target ${U_DESCRIPTION:-$U_UNIT}."
 }
 
+# (dinit) The `boot` service: everything of default.target has been dealt
+# with.  What waited for the end of the boot can go on (getty's Type=idle,
+# units that devices want, systemctl's "starting").
+cmd_booted() {
+  rm -f "$RT_STATE/.booting"
+}
+
 cmd_timer() {
   load "$1"
   mkdir -p /var/lib/units/timers
@@ -2097,13 +2181,22 @@ cmd_socket_activate() {
       continue
     fi
     # while the service runs, what comes is its own
-    s6-svwait -D "$dir" 2>/dev/null || { sleep 1; continue; }
+    if [[ $RT_INIT == dinit ]]; then
+      while rt_up "$U_SERVICE_ATOM"; do sleep 1; done
+    else
+      s6-svwait -D "$dir" 2>/dev/null || { sleep 1; continue; }
+    fi
     "${wait[@]}" "$(type -P redirfd)" -r 0 /dev/null unit-socket-wait -n "$n" || { sleep 1; continue; }
     # (it may have been started meanwhile)
-    if [[ $(s6-svstat -o up "$dir" 2>/dev/null) != true ]]; then
+    if ! rt_up "$U_SERVICE_ATOM"; then
       msg "something came for $svc: starting it"
       PATH=$PATH:$RT_DEFAULT_PATH systemctl ${scope_arg[@]+"${scope_arg[@]}"} start --no-block "$svc"
-      s6-svwait -u -t 90000 "$dir" 2>/dev/null
+      if [[ $RT_INIT == dinit ]]; then
+        local i
+        for (( i = 0; i < 450; i++ )); do rt_up "$U_SERVICE_ATOM" && break; sleep 0.2; done
+      else
+        s6-svwait -u -t 90000 "$dir" 2>/dev/null
+      fi
       # (one that fails to start does not get started in a loop)
       sleep 1
     fi
@@ -2259,6 +2352,7 @@ case $verb in
   accept-loop) cmd_accept_loop "$@" ;;
   accept-conn) cmd_accept_conn "$@" ;;
   log) cmd_log "$@" ;;
+  booted) cmd_booted ;;
   *)
     echo "usage: unit-runtime VERB DATA…  (see the comment at the top of $0)" >&2
     exit 100 ;;

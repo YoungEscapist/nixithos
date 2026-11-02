@@ -53,6 +53,7 @@ in
           unitRuntime = config.system.build.unitRuntime;
         };
         elogind = if config.services.elogind.enable then config.services.elogind.package else null;
+        inherit (config.nixithos) init;
         # The boot loader is not the init system: systemd-boot's installer and
         # EFI programs come out of systemd's package as they are, with only
         # the path they refer to themselves by changed (see boot-tool.nix).

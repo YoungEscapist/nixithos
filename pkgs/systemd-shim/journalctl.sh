@@ -53,7 +53,9 @@ atom_of() {
   case $name in *.service|*.socket|*.target|*.mount|*.timer|*.swap|*.path) ;; *) name=$name.service ;; esac
   live=$(readlink -f /run/s6-rc/compiled 2>/dev/null) || live=
   db=${live%/*}
-  [[ -n $live ]] || db=$(readlink -f /run/current-system/s6-db 2>/dev/null)
+  # (dinit: the database in use is /run/units/.db)
+  [[ -n $live ]] || db=$(readlink -f /run/units/.db 2>/dev/null) || db=
+  [[ -n $db ]] || db=$(readlink -f /run/current-system/s6-db 2>/dev/null)
   if [[ -r $db/index.tsv ]]; then
     while IFS=$'\t' read -r unit kind type rank boot atom rest; do
       if [[ $unit == "$name" ]]; then printf '%s' "$atom"; return; fi

@@ -6,6 +6,11 @@
 #   the database   built from the system's unit files by `unitc` (see
 #                  ../compat/units.nix), plus whatever is declared natively
 #                  through `s6.rc.services`
+#
+# With nixithos.init = "dinit" (../dinit) the database holds dinit's service
+# descriptions instead, and what is here about s6-linux-init is left out; the
+# rest (the runtime, the options of logging and native services, the fd
+# holder, the services of users, which keep their s6 trees) is shared.
 {
   config,
   lib,
@@ -16,6 +21,13 @@
 let
   inherit (lib) mkOption types;
   cfg = config.s6;
+  isS6 = config.nixithos.init == "s6";
+
+  # (dinit) where the database of the running configuration is: the services
+  # are read from it and refer to their unit data through it, so that their
+  # descriptions do not change from one configuration to the next unless
+  # their units do
+  live = "/run/units/.db";
 
   runtime = pkgs.nixithos.unitRuntime.override {
     logDir = cfg.logging.directory;
@@ -177,18 +189,8 @@ let
         done
       '';
 
-  database =
-    pkgs.runCommand "s6-rc-database"
-      {
-        nativeBuildInputs = [
-          pkgs.buildPackages.nixithos.unitc
-          pkgs.buildPackages.s6-rc
-        ];
-        units = config.system.build.systemUnits;
-        userUnits = userUnitsAll;
-        preferLocalBuild = true;
-        allowSubstitutes = false;
-      }
+  systemServices =
+    if isS6 then
       ''
         unitc \
           --units "$units" \
@@ -202,7 +204,43 @@ let
         s6-rc-compile -v1 "$out/compiled-boot" "$out/source-boot"
         s6-rc-compile -v1 "$out/compiled" "$out/source"
         ln -s "$units" "$out/units"
+      ''
+    else
+      ''
+        # dinit's descriptions (dinit/), with every path in them through the
+        # database of the running configuration
+        unitc \
+          --init dinit \
+          --units "$units" \
+          --out "$out" \
+          --final-out ${live} \
+          --runtime ${live}/bin/unit-runtime \
+          --supervise ${live}/bin/unit-supervise \
+          --execlineb ${pkgs.execline}/bin/execlineb \
+          --catchall-log /run/uncaught-logs/services \
+          --bash ${pkgs.runtimeShell} \
+          --fdholder unit-fdholder \
+          --notification-fd ${toString runtime.notificationFd} \
+          --native ${nativeJSON}
+        mkdir "$out/bin"
+        ln -s ${runtime}/bin/unit-runtime ${pkgs.nixithos.unitTools}/bin/unit-supervise "$out/bin/"
+        ln -s "$units" "$out/units"
+      '';
 
+  database =
+    pkgs.runCommand (if isS6 then "s6-rc-database" else "dinit-database")
+      {
+        nativeBuildInputs = [
+          pkgs.buildPackages.nixithos.unitc
+          pkgs.buildPackages.s6-rc
+        ];
+        units = config.system.build.systemUnits;
+        userUnits = userUnitsAll;
+        preferLocalBuild = true;
+        allowSubstitutes = false;
+      }
+      ''
+        ${systemServices}
         # The services of users: the same, from systemd.user.*, for the
         # supervision tree each user gets (../../pkgs/user-manager).
         mkdir "$out/user"
@@ -540,9 +578,18 @@ in
     };
   };
 
-  config = {
-    system.build.s6Database = database;
+  config = lib.mkMerge [ (lib.mkIf isS6 {
     system.build.s6InitBase = initBase;
+
+    system.systemBuilderCommands = ''
+      ln -s ${initBase} $out/s6-init
+    '';
+
+    environment.systemPackages = [ pkgs.s6-linux-init ];
+  }) {
+    # (the unit database of either init: the name is from before there was
+    # a choice, and stays, as /run/current-system/s6-db does)
+    system.build.s6Database = database;
     system.build.unitRuntime = runtime;
 
     # Sockets of .socket units are bound early and parked here until their
@@ -586,13 +633,13 @@ in
 
     system.systemBuilderCommands = ''
       ln -s ${database} $out/s6-db
-      ln -s ${initBase} $out/s6-init
     '';
 
+    # (with dinit too: the loggers, the fd holder and the managers of users
+    # are s6 programs)
     environment.systemPackages = [
       pkgs.s6
       pkgs.s6-rc
-      pkgs.s6-linux-init
       pkgs.s6-portable-utils
       pkgs.execline
     ];
@@ -607,5 +654,5 @@ in
         "noexec"
       ];
     };
-  };
+  } ];
 }
