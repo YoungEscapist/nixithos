@@ -64,7 +64,9 @@
             for c in (
                 "cat /run/user-managers/user-1000/run",
                 "s6-svstat /run/user-managers/user-1000",
-                "tail -n 30 /run/uncaught-logs/current",
+                # (what the user-managers service says: s6-svscan's catch-all
+                # log, or with dinit the one of services without a logger)
+                "tail -n 30 /run/uncaught-logs/current 2>/dev/null || tail -n 30 /run/uncaught-logs/services /run/uncaught-logs/dinit",
                 "ps -u alice -o pid,ppid,args | cut -c1-200",
                 "ls -la /run/user-managers/.state/1000/service /run/user-managers/.state/1000/s6-rc/servicedirs | head -40",
                 "for d in /run/user-managers/.state/1000/service/*; do echo $d; s6-svstat $d; done 2>&1 | head -30",
