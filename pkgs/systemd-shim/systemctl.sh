@@ -382,7 +382,24 @@ unit_state() {
 unit_state_raw() {
   local u=$1 st= res=
   if [[ ${I_KIND[$u]-} == virtual ]]; then
-    if s6-svstat -o up "/run/user-managers/user-${VIRT_UID[$u]}" 2>/dev/null | grep -q true; then
+    local m=/run/user-managers/user-${VIRT_UID[$u]} name f i
+    # A user who has just been made to linger: user-manager supervise starts
+    # the manager when it next looks (every two seconds), where with logind
+    # it would be being started already (`systemctl status user-UID.slice`
+    # right after linger-users, upstream's systemd-user-linger).  A moment
+    # for it, as for a timer that has just gone off.
+    if [[ -d /run/user-managers && $(s6-svstat -o up "$m" 2>/dev/null) != true ]] &&
+        name=$(id -nu "${VIRT_UID[$u]}" 2>/dev/null); then
+      for f in "/var/lib/systemd/linger/$name" "/var/lib/elogind/linger/$name"; do
+        [[ -e $f ]] && (( EPOCHSECONDS - $(stat -c %Y "$f" 2>/dev/null || echo 0) <= 5 )) || continue
+        for (( i = 0; i < 30; i++ )); do
+          [[ $(s6-svstat -o up "$m" 2>/dev/null) == true ]] && break
+          sleep 0.1
+        done
+        break
+      done
+    fi
+    if s6-svstat -o up "$m" 2>/dev/null | grep -q true; then
       active_state=active sub_state=running
     else
       active_state=inactive sub_state=dead
