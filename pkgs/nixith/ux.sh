@@ -180,7 +180,15 @@ why_unit() {
                 echo "        ${c_r}exited with status ${code:-$status}${c_0}, result: ${res:-$result}"
             fi
         else
-            echo "        result: $result (exit status ${status:-?})"
+            # (a job that runs once leaves no exit file; its log has the status)
+            local st
+            st=$( { tail -n 200 "/var/log/s6/$atom/current" 2> /dev/null; tail -n 20 "/run/units/$unit/journal" 2> /dev/null; } |
+                sed -n 's/.*\(FAILED (status \|failed with status \)\([0-9][0-9]*\).*/\2/p' | tail -n1)
+            if [ -n "$st" ]; then
+                echo "        ${c_r}exited with status $st${c_0}, result: ${result:-failed}"
+            else
+                echo "        result: ${result:-failed}"
+            fi
         fi
     fi
 
@@ -199,7 +207,7 @@ why_unit() {
             else
                 local upnow
                 upnow=$("$s6_rc" -a list 2> /dev/null || true)
-                echo "        $a: $(grep -qx -- "$a" <<< "$upnow" && echo 'up (not a supervised process)' || echo 'down')"
+                echo "        $a: a job that runs to completion, no process to supervise; s6-rc has it $(grep -qx -- "$a" <<< "$upnow" && echo up || echo down)"
             fi
         fi
     done

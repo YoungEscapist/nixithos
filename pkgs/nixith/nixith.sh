@@ -179,7 +179,7 @@ build_system() {
                 shift
                 ;;
             --service | --service=*)
-                die "there is no rollback of a single service, and not for want of trying: see 'Rolling back one service' in the README (nixith diff shows what a switch changes; nixith rollback goes back whole)"
+                die "there is no rollback of a single service, and not for want of trying: see 'There is no nixith rollback --service' in the README (nixith diff shows what a switch changes; nixith rollback goes back whole)"
                 ;;
             --fast | --no-build-nix)
                 shift

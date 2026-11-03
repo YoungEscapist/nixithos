@@ -55,6 +55,12 @@
             ExecStart = "${pkgs.writeShellScript "t-oneshot" "echo v1 > /run/t-oneshot.version"}";
           };
         };
+        # (started by hand in the test, to have something for `nixith why`
+        # to say about a failure)
+        t-broken.serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${pkgs.writeShellScript "t-broken" "echo broken-output; exit 3"}";
+        };
       };
 
       specialisation.next.configuration = {
@@ -127,6 +133,62 @@
         assert "t-change.service" in out and "t-new.service" in out
         assert pid("t-change") == before["t-change"]
 
+    with subtest("nixith diff"):
+        out = machine.succeed("nixith diff --system /run/current-system/specialisation/next 2>&1")
+        print(out)
+
+        def row(group, unit):
+            # the line of `unit` under the heading that starts with `group`
+            lines, here = out.splitlines(), None
+            for line in lines:
+                if line.startswith("  ") and not line.startswith("    "):
+                    here = line.strip()
+                elif here is not None and here.startswith(group) and line.strip().startswith(unit + " "):
+                    return line.strip()
+            raise AssertionError(f"{unit} is not under '{group}' in:\n{out}")
+
+        assert "will be started" in out and "new unit" in row("will be started", "t-new.service")
+        assert "no longer in the configuration" in row("will be stopped (", "t-remove.service")
+        assert "ExecStart changed" in row("will be stopped, then started", "t-change.service")
+        assert "ExecStart changed" in row("will be reloaded", "t-reload.service")
+        assert "ExecStart changed" in row("changed, but left running", "t-pinned.service")
+        assert "ExecStart changed" in row("will be stopped, then started", "t-oneshot.service")
+        assert "t-keep.service" not in out
+        assert "not touched:" in out and "Packages" in out
+        # it only looks
+        assert pid("t-change") == before["t-change"]
+        machine.fail("test -e /run/t-new.version")
+        # the same system: nothing would change
+        assert "nothing would change" in machine.succeed("nixith diff --system /run/current-system")
+        # one service cannot be rolled back on its own, and it says why
+        err = machine.fail("nixith rollback --service t-keep 2>&1")
+        assert "single service" in err
+
+    with subtest("nixith why"):
+        out = machine.succeed("nixith why t-keep")
+        print(out)
+        assert "t-keep.service" in out and "active (running)" in out
+        assert f"Manager {init}" in out
+        assert "└─ t-keep.service (wants)" in out and "multi-user.target" in out
+        assert "started at boot" in out
+        # an alias and the bare name
+        assert "t-keep.service" in machine.succeed("nixith why t-keep.service")
+        assert "no unit" in machine.fail("nixith why t-nosuch 2>&1")
+
+        # a failure: by what, and not wanted by anything
+        machine.fail("systemctl start t-broken")
+        out = machine.succeed("nixith why t-broken")
+        print(out)
+        assert "failed" in out and "exited with status 3" in out
+        assert "does not pull it in" in out
+        machine.wait_until_succeeds("nixith why t-broken | grep broken-output > /dev/null")
+        machine.succeed("systemctl reset-failed t-broken")
+
+        # the list
+        out = machine.succeed("nixith services --list")
+        assert "t-keep.service" in out and "active" in out
+        assert "t-broken.service" in machine.succeed("nixith services --list broken")
+
     with subtest("switch"):
         print(machine.succeed("/run/current-system/specialisation/next/bin/switch-to-configuration test 2>&1"))
         machine.succeed("test \"$(cat /etc/t-file)\" = v2")
@@ -147,6 +209,18 @@
         machine.wait_until_succeeds("test -e /run/t-job.ran", timeout=30)
         machine.fail("pgrep -f 't-daemon t-remove'")
         machine.fail("systemctl is-active t-remove")
+
+    with subtest("nixith why, after the switch"):
+        # a service that waits on its socket: started on demand
+        out = machine.succeed("nixith why t-echo.service")
+        print(out)
+        assert "started on demand by: t-echo.socket" in out
+        # the unit that is gone
+        assert "no unit" in machine.fail("nixith why t-remove 2>&1")
+        # and the diff to where the system came from
+        out = machine.succeed("nixith diff --system /run/booted-system 2>&1")
+        print(out)
+        assert "t-remove.service" in out and "t-new.service" in out
 
     with subtest("reloadIfChanged and restartIfChanged"):
         machine.succeed("test -e /run/t-reload.reloaded")

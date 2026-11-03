@@ -51,7 +51,7 @@ replaceVarsWith {
     s6svstat = "${s6}/bin/s6-svstat";
     s6rc = "${s6-rc}/bin/s6-rc";
     dinitctl = "${dinit}/bin/dinitctl";
-    ux = ./ux.sh;
+    ux = "${./ux.sh}";
   };
 
   postInstall = ''
