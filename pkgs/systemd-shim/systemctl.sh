@@ -982,7 +982,18 @@ power() {
     dsd=${dsd%/*}/shutdown
     # -ff: at once, without stopping anything
     (( opt_force >= 2 )) && exec "$dsd" --system "$flag"
-    (( opt_force )) || dinit_stop_ordered
+    if (( ! opt_force )); then
+      # The units are stopped from here, and this process is in the control
+      # group of one of them: the login shell's getty, elogind (which runs
+      # `poweroff` for a desktop's power button), a session's display
+      # manager.  The stop of that unit would kill this process with it,
+      # halfway, and nothing would shut the machine down.  So: out of it,
+      # into the root group, deaf to the hangup of the terminal it came from.
+      { echo "$BASHPID" > /sys/fs/cgroup/cgroup.procs; } 2>/dev/null
+      trap '' HUP
+      dinit_stop_ordered
+      trap - HUP
+    fi
     exec "$dsd" "$flag"
   fi
   if (( opt_force >= 2 )); then
