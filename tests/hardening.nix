@@ -146,10 +146,7 @@
         hd-errno = unit (
           out "errno"
           // {
-            SystemCallFilter = [
-              "~getpriority:EPERM"
-              "chroot:EACCES"
-            ];
+            SystemCallFilter = "~getpriority:EPERM chroot:EACCES";
           }
         ) (sh "hd-errno" ''
           ${p} sys getpriority
@@ -176,7 +173,7 @@
           }
         ) (sh "hd-groups" ''
           echo "shell: ok"
-          cat /etc/hd-file
+          echo "file: $(cat /etc/hd-file)"
           ${p} sys getpriority
           ${p} forks 3
           ${p} sys chroot
