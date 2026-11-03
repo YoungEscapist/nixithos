@@ -14,6 +14,8 @@
         password = "wonderland";
       };
       users.users.root.openssh.authorizedKeys.keyFiles = [ ./configs/ssh-test-key.pub ];
+      # (for the poweroff typed at a console)
+      users.users.root.password = "queen";
     };
 
   nodes.client =
@@ -71,5 +73,18 @@
         for m in (server, client):
             failed = m.succeed("systemctl list-units --failed --no-legend").strip()
             assert failed == "", f"failed units on {m.name}:\n{failed}"
+
+    with subtest("poweroff typed at a console"):
+        # The getty of that console is among the units stopped on the way:
+        # the session goes, and the poweroff must not go with it (under
+        # dinit, systemctl stops the units itself).
+        server.send_key("alt-f2")
+        server.wait_until_tty_matches("2", "login: ")
+        server.send_chars("root\n")
+        server.wait_until_tty_matches("2", "Password: ")
+        server.send_chars("queen\n")
+        server.wait_until_succeeds("pgrep -t tty2 -u root bash")
+        server.send_chars("poweroff\n")
+        server.wait_for_shutdown()
   '';
 }
