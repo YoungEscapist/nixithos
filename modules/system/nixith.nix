@@ -27,6 +27,7 @@ let
     nixos-install = config.system.build.nixos-install;
     nixos-generate-config = config.system.build.nixos-generate-config;
     nixos-option = pkgs.nixos-option.override { nix = config.nix.package; };
+    nixith-services = pkgs.callPackage ../../pkgs/nixith/services.nix { };
   };
 
   # What `nixith generate-config` writes: nixpkgs' configuration.nix, in

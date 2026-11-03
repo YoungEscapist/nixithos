@@ -7,6 +7,10 @@ set -euo pipefail
 export PATH=@path@:$PATH
 tree=@tree@
 nixpkgs=@nixpkgs@
+services_tui=@services@/bin/nixith-services
+s6_svstat=@s6svstat@
+s6_rc=@s6rc@
+dinitctl=@dinitctl@
 profiles=/nix/var/nix/profiles
 
 die() {
@@ -26,6 +30,13 @@ Building the system:
   build             build it (./result)
   dry-build         show what would be built
   dry-activate      build it and show what switching would do
+  diff              build it and show what switching would do, in the words of
+                    the units: which are stopped, restarted, reloaded or
+                    started, and why; and the packages that change.  Changes
+                    nothing (as root, to see the running units).
+                    --rollback: what the previous generation would do;
+                    --system PATH: a built system instead of building one;
+                    --full: all the package lines
   build-vm          a script that boots it in QEMU (./result/bin/run-*-vm)
   rollback          switch back to the previous generation
 
@@ -40,6 +51,13 @@ Building the system:
   --upgrade (update the channels first)
   Nix's options are passed on: -I, -j, --cores, --option, --show-trace,
   --keep-going, --fallback, -v, -L...
+
+The running system:
+  why UNIT          why the unit runs or not: the chain from the default target
+                    that pulls it in, its state, how it ended (status or
+                    signal), what the service manager says, the end of its log
+  services          a console list of the units: filter (/), Enter for status
+                    and log, s start, x stop, r restart (as root, to change)
 
 The rest:
   parts             what the running system was built from, part by part
@@ -100,7 +118,7 @@ build_system() {
     local action=$1
     shift
     local only=() file="" flake="" profile=system specialisation=""
-    local installBootloader="" upgrade="" rollback=""
+    local installBootloader="" upgrade="" rollback="" prebuilt="" full=""
     local nixArgs=()
     while [ $# -gt 0 ]; do
         case $1 in
@@ -150,6 +168,19 @@ build_system() {
                 rollback=1
                 shift
                 ;;
+            --system)
+                [ "$action" = diff ] || die "--system goes with diff"
+                [ $# -ge 2 ] || die "--system wants a built system"
+                prebuilt=$2
+                shift 2
+                ;;
+            --full)
+                full=1
+                shift
+                ;;
+            --service | --service=*)
+                die "there is no rollback of a single service, and not for want of trying: see 'Rolling back one service' in the README (nixith diff shows what a switch changes; nixith rollback goes back whole)"
+                ;;
             --fast | --no-build-nix)
                 shift
                 ;;
@@ -192,15 +223,18 @@ build_system() {
                 nix-env -p "$profilePath" --rollback
                 out=$(readlink -f "$profilePath")
                 ;;
-            test | build)
+            test | build | diff)
                 local gen
                 gen=$(nix-env -p "$profilePath" --list-generations | tail -2 | head -1 | awk '{print $1}')
                 [ "$(nix-env -p "$profilePath" --list-generations | wc -l)" -ge 2 ] || gen=""
                 [ -n "$gen" ] || die "there is no previous generation"
                 out=$(readlink -f "$profilePath-$gen-link")
                 ;;
-            *) die "--rollback goes with switch, boot, test or build" ;;
+            *) die "--rollback goes with switch, boot, test, build or diff" ;;
         esac
+    elif [ -n "$prebuilt" ]; then
+        [ -e "$prebuilt/bin/switch-to-configuration" ] || die "$prebuilt is not a system"
+        out=$(readlink -f "$prebuilt")
     else
         if [ -n "$upgrade" ]; then
             [ "$(id -u)" = 0 ] || die "--upgrade updates root's channels: run as root"
@@ -285,8 +319,14 @@ build_system() {
         test | dry-activate)
             "$target/bin/switch-to-configuration" "$action"
             ;;
+        diff)
+            system_diff "$target" /run/current-system "$full"
+            ;;
     esac
 }
+
+# nixith diff, nixith why
+. @ux@
 
 # what the running system was built from
 parts() {
@@ -439,10 +479,12 @@ if [ "$command" = rebuild ]; then
     [ $# -gt 0 ] && shift
 fi
 case $command in
-    switch | boot | test | build | dry-build | dry-run | dry-activate | build-vm | build-vm-with-bootloader | rollback)
+    switch | boot | test | build | dry-build | dry-run | dry-activate | diff | build-vm | build-vm-with-bootloader | rollback)
         [ "$command" = dry-run ] && command=dry-build
         build_system "$command" "$@"
         ;;
+    why) why_unit "$@" ;;
+    services) exec "$services_tui" "$@" ;;
     parts) parts "$@" ;;
     generations | list-generations)
         generations "$@"

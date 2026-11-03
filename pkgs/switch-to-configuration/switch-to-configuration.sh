@@ -1,11 +1,14 @@
 #!@shell@
 # switch-to-configuration - make a built system the one that runs.
 #
-#   switch-to-configuration switch|boot|test|dry-activate
+#   switch-to-configuration switch|boot|test|dry-activate|plan
 #
 # Same contract as the NixOS program of that name (it is what nixos-rebuild
 # calls): `boot` only updates the boot loader, `test` only changes the
 # running system, `switch` does both, `dry-activate` says what would happen.
+# `plan` (not in NixOS) says which units would be stopped, restarted, reloaded
+# or started and why, as lines of tab-separated fields, for `nixith diff`;
+# it changes nothing and takes no lock.
 #
 # Changing the running system means:
 #   1. stop the units whose definition changed and that want to be stopped
@@ -31,15 +34,16 @@ toplevel=${TOPLEVEL:?switch-to-configuration must be run through the system clos
 action=${1-}
 
 case $action in
-  switch|boot|test|dry-activate) ;;
+  switch|boot|test|dry-activate|plan) ;;
   *)
     cat >&2 <<EOF
-Usage: $0 [switch|boot|test|dry-activate]
+Usage: $0 [switch|boot|test|dry-activate|plan]
 
 switch:       make the configuration the boot default and activate now
 boot:         make the configuration the boot default
 test:         activate the configuration, but don't make it the boot default
 dry-activate: show what would be done if this configuration were activated
+plan:         the same for the units, as TAB separated lines (action, unit, why)
 EOF
     exit 1 ;;
 esac
@@ -47,11 +51,13 @@ esac
 STATE=/run/units
 SCAN=/run/service
 
-mkdir -p /run/nixos
-exec 9> /run/nixos/switch-to-configuration.lock
-flock 9 || { echo "could not acquire the switch lock" >&2; exit 1; }
+if [[ $action != plan ]]; then
+  mkdir -p /run/nixos
+  exec 9> /run/nixos/switch-to-configuration.lock
+  flock 9 || { echo "could not acquire the switch lock" >&2; exit 1; }
+fi
 
-if [[ -z ${NIXOS_NO_CHECK-} && -n ${PRE_SWITCH_CHECK-} ]]; then
+if [[ $action != plan && -z ${NIXOS_NO_CHECK-} && -n ${PRE_SWITCH_CHECK-} ]]; then
   "$PRE_SWITCH_CHECK" "$toplevel" "$action" || exit $?
 fi
 
@@ -87,6 +93,7 @@ fi
 if [[ -z $live || ! -r $old_db/switch.tsv ]]; then
   # Not running on s6-rc (a chroot, an installer): there is nothing to
   # reconcile, just lay down the configuration.
+  if [[ $action == plan ]]; then printf '#note\tno service manager of this system is running (a chroot, an installer): there are no units to compare\n'; exit 0; fi
   if [[ $action == dry-activate ]]; then exec "$toplevel/dry-activate" "$toplevel"; fi
   echo "activating the configuration..."
   exec "$toplevel/activate" "$toplevel"
@@ -96,6 +103,7 @@ if [[ $running_init != "$new_init" ]]; then
   # What runs stays as it is: the new init system and its services take over
   # at the next boot.  The rest of the configuration is laid down now.
   echo "the new configuration is for $new_init, and $running_init runs this machine: its services change over at the next boot" >&2
+  if [[ $action == plan ]]; then printf '#note\tthe new configuration is for %s and %s runs this machine: its services change over at the next boot\n' "$new_init" "$running_init"; exit 0; fi
   if [[ $action == dry-activate ]]; then exec "$toplevel/dry-activate" "$toplevel"; fi
   echo "activating the configuration..."
   exec "$toplevel/activate" "$toplevel"
@@ -184,18 +192,73 @@ is_active() {
   [[ $st == active ]]
 }
 
-removed=() stop_start=() restart=() reload=() skipped=() rerun=()
+# Why a unit counts as changed, in a line (for the plan): the keys of its unit
+# file and drop-ins that differ, with what changed in the store paths they
+# name; then its runtime data, if the file is the same.
+store_names() { grep -o '/nix/store/[a-z0-9]\{32\}-[^ /"'"'"':;]*' | sed 's#^/nix/store/[a-z0-9]*-##; s#^X-\(Restart\|Reload\)-Triggers-##'; }
+# store paths that are in the first set of lines and not in the second, then
+# the other way round, by name: "pkg-1 -> pkg-2", "added x", "rebuilt x"
+store_delta() {
+  local gone new g n
+  gone=$(comm -23 <(printf '%s\n' "$1" | grep -o '/nix/store/[a-z0-9]\{32\}-[^ /"'"'"':;]*' | sort -u) <(printf '%s\n' "$2" | grep -o '/nix/store/[a-z0-9]\{32\}-[^ /"'"'"':;]*' | sort -u))
+  new=$(comm -13 <(printf '%s\n' "$1" | grep -o '/nix/store/[a-z0-9]\{32\}-[^ /"'"'"':;]*' | sort -u) <(printf '%s\n' "$2" | grep -o '/nix/store/[a-z0-9]\{32\}-[^ /"'"'"':;]*' | sort -u))
+  g=$(store_names <<< "$gone" | sort -u | head -n 3 | paste -sd, - | sed 's/,/, /g')
+  n=$(store_names <<< "$new" | sort -u | head -n 3 | paste -sd, - | sed 's/,/, /g')
+  if [[ -n $g && -n $n ]]; then
+    if [[ $g == "$n" ]]; then printf 'rebuilt: %s' "$n"; else printf '%s -> %s' "$g" "$n"; fi
+  elif [[ -n $n ]]; then printf 'added %s' "$n"
+  elif [[ -n $g ]]; then printf 'removed %s' "$g"
+  fi
+}
+unit_text() {  # the unit file and its drop-ins, the settings only
+  local f=$1/units/$2
+  { cat "$f" "$f".d/*.conf 2>/dev/null || true; } | grep -E '^[A-Za-z][A-Za-z0-9-]*=' | sort -u
+}
+why_changed() {
+  local unit=$1 a b key keys parts=() o n shown=0
+  a=$(unit_text "$old_db" "$unit") b=$(unit_text "$new_db" "$unit")
+  keys=$(comm -3 <(printf '%s\n' "$a") <(printf '%s\n' "$b") | sed -E 's/^[[:space:]]+//; s/=.*//' | sort -u)
+  for key in $keys; do
+    (( shown++ >= 4 )) && { parts+=("..."); break; }
+    o=$(printf '%s\n' "$a" | sed -n "s/^$key=//p")
+    n=$(printf '%s\n' "$b" | sed -n "s/^$key=//p")
+    case $key in
+      X-Restart-Triggers|X-Reload-Triggers)
+        local what=restartTriggers names
+        [[ $key == X-Reload-Triggers ]] && what=reloadTriggers
+        # the paths that are not in both, by name
+        names=$(comm -3 <(printf '%s\n' $o | sort -u) <(printf '%s\n' $n | sort -u) | store_names | sort -u | head -n 3 | paste -sd, - | sed 's/,/, /g')
+        parts+=("$what changed${names:+ ($names)}") ;;
+      *)
+        local d
+        d=$(store_delta "$o" "$n")
+        parts+=("$key changed${d:+ ($d)}") ;;
+    esac
+  done
+  if (( ${#parts[@]} == 0 )); then
+    if ! cmp -s "$old_db/unit-data/$unit" "$new_db/unit-data/$unit" 2>/dev/null; then
+      parts+=("how it is run changed (paths or environment of its tools)")
+    else
+      parts+=("its definition changed")
+    fi
+  fi
+  local out= part
+  for part in "${parts[@]}"; do out+="${out:+; }$part"; done
+  printf '%s\n' "$out"
+}
+
+removed=() stop_start=() restart=() reload=() skipped=() rerun=() idle=0 same=0
 for unit in "${!OLD_HASH[@]}"; do
   if [[ -z ${NEW_HASH[$unit]-} ]]; then
     is_active "$unit" && removed+=("$unit")
     continue
   fi
-  [[ ${OLD_HASH[$unit]} == "${NEW_HASH[$unit]}" ]] && continue
+  if [[ ${OLD_HASH[$unit]} == "${NEW_HASH[$unit]}" ]]; then same=$(( same + 1 )); continue; fi
   if is_run_once "$unit"; then
     rerun+=("$unit")
     continue
   fi
-  is_active "$unit" || continue
+  is_active "$unit" || { idle=$(( idle + 1 )); continue; }
   case $unit in *.target|*.device) continue ;; esac
   if [[ ${NEW_RELOAD[$unit]} == 1 ]]; then
     reload+=("$unit")
@@ -221,6 +284,29 @@ done < "$new_db/index.tsv"
 
 list() { local IFS=,; printf '%s\n' "${*}" | sed 's/,/, /g'; }
 sorted() { printf '%s\n' "$@" | sort; }
+
+if [[ $action == plan ]]; then
+  # action  unit  why; then "same N" and "idle N" (changed, not running)
+  plan() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
+  for unit in $(sorted ${removed[@]+"${removed[@]}"}); do plan stop "$unit" "no longer in the configuration"; done
+  for unit in $(sorted ${stop_start[@]+"${stop_start[@]}"}); do
+    plan stop-start "$unit" "$(why_changed "$unit")"
+  done
+  for unit in $(sorted ${restart[@]+"${restart[@]}"}); do plan restart "$unit" "$(why_changed "$unit")"; done
+  for unit in $(sorted ${rerun[@]+"${rerun[@]}"}); do
+    plan rerun "$unit" "$(why_changed "$unit")"
+  done
+  for unit in $(sorted ${reload[@]+"${reload[@]}"}); do plan reload "$unit" "$(why_changed "$unit")"; done
+  for unit in $(sorted ${skipped[@]+"${skipped[@]}"}); do
+    plan keep "$unit" "$(why_changed "$unit")"
+  done
+  for unit in $(sorted ${start[@]+"${start[@]}"}); do
+    if [[ -z ${OLD_HASH[$unit]-} ]]; then plan start "$unit" "new unit"
+    else plan start "$unit" "wanted at boot, not running now"; fi
+  done
+  printf 'same\t%s\t\nidle\t%s\t\n' "$same" "$idle"
+  exit 0
+fi
 
 if [[ $action == dry-activate ]]; then
   (( ${#removed[@]} + ${#stop_start[@]} )) && echo "would stop the following units: $(list $(sorted "${removed[@]}" "${stop_start[@]}"))"
