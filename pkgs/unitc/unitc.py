@@ -920,12 +920,13 @@ IGNORED_QUIETLY = {
         "ImportCredential", "RestartSteps", "RestartMaxDelaySec", "RestartMode",
         "CoredumpFilter", "ExitType", "DefaultDependencies",
         "FileDescriptorName", "Sockets", "CPUSchedulingResetOnFork",
-        "MemoryDenyWriteExecute", "LockPersonality",
     },
 }
 
-# Sandboxing and hardening.  Services run without them; listed in the report.
+# Sandboxing and hardening.  What is not applied (SANDBOX_APPLIED) is listed in
+# the report; modules/system/hardening.nix warns about the same at build time.
 SANDBOX_KEYS = {
+    "MemoryDenyWriteExecute", "LockPersonality",
     "PrivateTmp", "PrivateDevices", "PrivateNetwork", "PrivateUsers", "PrivateMounts",
     "PrivateIPC", "PrivatePIDs", "ProtectSystem", "ProtectHome", "ProtectKernelTunables",
     "ProtectKernelModules", "ProtectKernelLogs", "ProtectControlGroups", "ProtectClock",
@@ -1032,12 +1033,48 @@ def caps_to_setpriv(words, bounding):
 # Sandboxing directives that are applied (by unit-sandbox, or as dropped
 # capabilities).  The rest of SANDBOX_KEYS stays in the report.
 SANDBOX_APPLIED = {
+    # (by unit-seccomp)
+    "SystemCallFilter", "SystemCallErrorNumber", "SystemCallArchitectures",
+    "RestrictAddressFamilies", "RestrictNamespaces", "RestrictRealtime",
+    "RestrictSUIDSGID", "MemoryDenyWriteExecute", "LockPersonality",
+    "ProtectProc", "ProcSubset",
     "PrivateTmp", "PrivateDevices", "PrivateNetwork", "PrivateMounts", "PrivateIPC",
     "ProtectSystem", "ProtectHome", "ProtectKernelTunables", "ProtectKernelModules",
     "ProtectKernelLogs", "ProtectControlGroups", "ProtectClock", "ProtectHostname",
     "ReadWritePaths", "ReadOnlyPaths", "InaccessiblePaths", "BindPaths",
     "BindReadOnlyPaths", "TemporaryFileSystem", "MountAPIVFS", "RootDirectoryStartOnly",
 }
+
+
+def seccomp_settings(u, section):
+    """The arguments of unit-seccomp for one unit (systemd.exec(5): system call
+    filters and the restrictions that are made of them)."""
+    s = u.settings
+    g = lambda k, d=None: s.get(section, k, d)
+    args = []
+    for v in s.all(section, "SystemCallArchitectures"):
+        args += ["--arch", v]
+    for v in s.all(section, "SystemCallFilter"):
+        args += ["--syscall-filter", v]
+    if g("SystemCallErrorNumber"):
+        args += ["--syscall-errno", g("SystemCallErrorNumber").strip()]
+    for v in s.all(section, "RestrictAddressFamilies"):
+        args += ["--address-families", v]
+    # the last assignment counts; a list of namespaces is one value
+    ns = g("RestrictNamespaces")
+    if ns is not None and ns.strip():
+        args += ["--restrict-namespaces", ns.strip()]
+    dyn = parse_bool(g("DynamicUser"))
+    # (DynamicUser= implies RestrictSUIDSGID=, systemd.exec(5))
+    if parse_bool(g("RestrictSUIDSGID"), dyn):
+        args.append("--restrict-suid-sgid")
+    if parse_bool(g("RestrictRealtime")):
+        args.append("--restrict-realtime")
+    if parse_bool(g("MemoryDenyWriteExecute")):
+        args.append("--mdwe")
+    if parse_bool(g("LockPersonality")):
+        args.append("--lock-personality")
+    return args
 
 
 def sandbox_settings(u, section, report):
@@ -1071,6 +1108,14 @@ def sandbox_settings(u, section, report):
     if on("ProtectHostname"):
         args.append("--private-uts")
 
+    # /proc as a file system of its own (hidepid=, subset=): a pid namespace
+    # is not needed for that
+    pp = (g("ProtectProc") or "default").strip().lower()
+    if pp in ("noaccess", "invisible", "ptraceable"):
+        args += ["--protect-proc", pp]
+    if (g("ProcSubset") or "all").strip().lower() == "pid":
+        args.append("--proc-subset")
+
     ps = (g("ProtectSystem") or "").strip().lower()
     if ps in ("yes", "true", "1", "on"):
         ps = "yes"
@@ -1085,7 +1130,6 @@ def sandbox_settings(u, section, report):
     # systemd 260 leaves /run writable under ProtectSystem=strict when
     # ProtectProc= or ProcSubset= is set as well (it remounts differently
     # then); nginx relies on it (nixpkgs' nginx-tmpdir test writes in /run)
-    pp = (g("ProtectProc") or "default").strip().lower()
     if ps == "strict" and (pp != "default" or (g("ProcSubset") or "").strip().lower() == "pid"):
         args.append("--strict-run-writable")
 
@@ -1248,6 +1292,7 @@ def emit_exec_context(u, section, lines, report):
             cap_bound = ",".join([t for t in cap_bound.split(",") if t] + ["-" + c for c in cap_drops])
     lines.append("U_CAP_BOUND=%s" % sq(cap_bound))
     lines.append(sh_array("U_SANDBOX", sandbox_args))
+    lines.append(sh_array("U_SECCOMP", seccomp_settings(u, section)))
     lines.append("U_NNP=%d" % parse_bool(g("NoNewPrivileges")))
 
     lines.append("U_STDIN=%s" % sq(g("StandardInput", "null")))
@@ -1295,6 +1340,10 @@ def emit_exec_context(u, section, lines, report):
         if val is not None:
             cg.append("%s\x1f%s" % (fname, val))
     lines.append(sh_array("U_CGROUP_SET", cg))
+    if cg and SCOPE == "user":
+        # (a user's services have no control group of their own to limit)
+        report.add(u.name, "resource", "not applied in a user's service: "
+                   + " ".join(sorted(k for k in CGROUP_KEYS if g(k) is not None)))
 
     sandbox = sorted(k for k in s.keys(section) if k in SANDBOX_KEYS and k not in SANDBOX_APPLIED)
     if sandbox:

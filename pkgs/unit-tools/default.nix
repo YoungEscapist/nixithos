@@ -5,6 +5,7 @@
   lib,
   stdenv,
   pam,
+  libseccomp,
 }:
 
 stdenv.mkDerivation {
@@ -13,11 +14,14 @@ stdenv.mkDerivation {
 
   src = lib.cleanSourceWith {
     src = ./.;
-    filter = path: _type: lib.hasSuffix ".c" path;
+    filter = path: _type: lib.hasSuffix ".c" path || lib.hasSuffix ".inc" path;
   };
 
-  # (unit-pam)
-  buildInputs = [ pam ];
+  # (unit-pam; unit-seccomp and unit-chroot)
+  buildInputs = [
+    pam
+    libseccomp
+  ];
 
   dontConfigure = true;
 
@@ -26,6 +30,7 @@ stdenv.mkDerivation {
     for src in unit-*.c; do
       libs=
       [ "$src" = unit-pam.c ] && libs=-lpam
+      case $src in unit-seccomp.c | unit-chroot.c) libs=-lseccomp ;; esac
       $CC -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -o "''${src%.c}" "$src" $libs
     done
     # PAM modules
