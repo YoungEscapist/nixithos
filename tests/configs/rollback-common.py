@@ -13,11 +13,14 @@ def profile():
     return machine.succeed("readlink /nix/var/nix/profiles/system").strip()
 
 
+base = None  # the system the specialisations are taken from (the first one)
+
+
 def new_generation(spec):
     """What `nixith boot` does after the build: the system of a specialisation
     of the booted one becomes a new generation, and the boot loader is
     installed for it."""
-    top = machine.succeed(f"readlink -f /run/booted-system/specialisation/{spec}").strip()
+    top = machine.succeed(f"readlink -f {base}/specialisation/{spec}").strip()
     machine.succeed(f"nix-env -p /nix/var/nix/profiles/system --set {top}")
     out = machine.succeed(f"{top}/bin/switch-to-configuration boot 2>&1")
     print(out)

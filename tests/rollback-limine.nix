@@ -31,6 +31,7 @@
       machine.start(allow_reboot=True)
       assert boot_ended() == "good", "the first boot is a plain one"
       gen1 = booted()
+      base = gen1
       default1 = default_entry()
 
       with subtest("nothing is on trial at first"):
