@@ -18,8 +18,10 @@
  *              manager's units/.sv with UNIT_SCOPE=user)
  *   -n FD      readiness: the process gets a pipe on FD and writes a line to
  *              it when it is ready; the first time that happens, a line goes
- *              to FD of this program too (the service manager's pipe:
- *              dinit's `ready-notification = pipefd:FD`)
+ *              to the service manager's pipe: the descriptor the environment
+ *              variable UNIT_SV_READY_FD names (dinit's `ready-notification =
+ *              pipevar:UNIT_SV_READY_FD`), or else FD of this program
+ *              (pipefd:FD)
  *   -s SIGNAL  what stops the process (KillSignal=; default TERM)
  *   -k MS      after that long, SIGKILL (0: never)
  *   -f MS      how long finish may take (default 90000)
@@ -353,10 +355,22 @@ int main(int argc, char **argv) {
   snprintf(status_path, sizeof status_path, "%s/%s", base, atom);
   snprintf(status_tmp, sizeof status_tmp, "%s/.%s.new", base, atom);
 
-  /* the service manager's pipe moves out of the way of the process's */
-  if (nfd >= 0 && fcntl(nfd, F_GETFD) >= 0) {
-    mgr_fd = fcntl(nfd, F_DUPFD_CLOEXEC, 100);
-    close(nfd);
+  /* The service manager's pipe, out of the way of the process's: the
+   * descriptor that UNIT_SV_READY_FD names (dinit's `ready-notification =
+   * pipevar:UNIT_SV_READY_FD`), or else FD of -n itself (pipefd:FD).  dinit
+   * 0.22 loses a forced descriptor when the write end of the service's log
+   * pipe has that number in dinit (run_child_proc moves it over stdout and
+   * closes it): with pipevar it picks the number itself, and that does not
+   * happen. */
+  int mfd = nfd;
+  const char *rv = getenv("UNIT_SV_READY_FD");
+  if (rv && *rv) {
+    mfd = atoi(rv);
+    unsetenv("UNIT_SV_READY_FD");
+  }
+  if (mfd >= 0 && fcntl(mfd, F_GETFD) >= 0) {
+    mgr_fd = fcntl(mfd, F_DUPFD_CLOEXEC, 100);
+    close(mfd);
   }
 
   sigset_t mask;

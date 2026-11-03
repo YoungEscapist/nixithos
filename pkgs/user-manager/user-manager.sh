@@ -1,5 +1,6 @@
 #!@shell@
-# user-manager - one s6 supervision tree per logged-in user.
+# user-manager - one service manager per logged-in user: an s6 supervision
+# tree, or dinit --user on a system that dinit runs (nixithos.init).
 #
 # `systemd --user` is a service manager of its own, started by PID 1 when the
 # first session of a user opens and stopped when the last one closes.  Here
@@ -9,9 +10,17 @@
 #             sessions and starts or stops the manager
 #   run       the manager as a service of the system's s6: becomes the user,
 #             with a clean environment, and runs `session`
-#   session   (as the user) s6-svscan on /run/user-managers/.state/UID/service, the user's
-#             compiled s6-rc database brought up, and a stop that takes the
-#             services down in order
+#   session   (as the user) the manager.  s6: s6-svscan on
+#             /run/user-managers/.state/UID/service, the user's compiled
+#             s6-rc database brought up, and a stop that takes the services
+#             down in order.  dinit: `dinit --user` on the descriptions of
+#             the user database (unitc --init dinit --scope user), through a
+#             link in that directory (db); it stops its services when told
+#             to stop, and its `boot` service says when it is up.
+#
+# Which of the two is a matter of the database: the one of the users'
+# services of the configuration that runs (user_db) has s6-rc's compiled
+# databases or dinit's descriptions in it.
 #
 # The system-side services live in /run/user-managers, a scan directory of
 # its own that the system service `user-managers` supervises.  That service
@@ -45,6 +54,44 @@ lookup() {
 }
 
 manager_dir() { printf '%s/user-%s' "$SCAN" "$1"; }
+
+# The database of the users' services of the configuration that runs: the
+# one dinit runs the system on (/run/units/.db), or else the current
+# system's.  The two differ only after a switch to a configuration of the
+# other init system, whose services take over at the next boot: a manager
+# started meanwhile is of the kind of the init that runs.
+user_db() {
+  local d
+  if [[ -L /run/units/.db && ! -e /run/s6-rc/compiled ]]; then
+    d=$(readlink -f /run/units/.db) || return 1
+  else
+    d=$(readlink -f /run/current-system/s6-db) || return 1
+  fi
+  printf '%s/user' "$d"
+}
+
+# DN: the name dinit knows atom $1 by (unitc's dname: `@`, `\`, `:` are not
+# allowed in it)
+dinit_name() {
+  DN=${1//@/＠}
+  DN=${DN//\\/∖}
+  DN=${DN//:/꞉}
+}
+
+# UP: what a dinit has started (`dinitctl list`: "[{+}     ] name …", the
+# third character is + when started, s when its start was skipped), by dinit
+# name, between spaces; LOADED: every service it has loaded, one per line
+dinit_listing() {
+  local line name
+  UP=" " LOADED=
+  while IFS= read -r line; do
+    name=${line:11}
+    name=${name%% *}
+    [[ -n $name ]] || continue
+    LOADED+="$name"$'\n'
+    [[ ${line:2:1} == [+s] ]] && UP+="$name "
+  done < <("$@" list 2>/dev/null)
+}
 
 start_manager() {
   local uid=$1 dir
@@ -347,7 +394,8 @@ cmd_session() {
   # for what is run for this manager from outside of it (`systemctl --user`)
   env -0 > "$st/environment"
 
-  db=$(readlink -f /run/current-system/s6-db)/user
+  db=$(user_db) || db=
+  [[ -d $db/dinit ]] && session_dinit "$st" "$db"
   [[ -d $db/compiled-boot ]] || { log "no database for user services in $db"; exit 1; }
 
   mkdir -p "$st/units" "$scandir" "${XDG_STATE_HOME:-$HOME/.local/state}/s6"
@@ -406,6 +454,35 @@ cmd_session() {
   wait "$svpid"
 }
 
+# (as the user) The manager under dinit: dinit --user, which is this process
+# from here on.  Everything of its database is named through the link $st/db
+# (the descriptions and the unit data have ${UNIT_USER_STATE}/db in them,
+# see ../../modules/s6/default.nix), which a switch moves.  Its `boot`
+# service runs `unit-runtime booted` once what default.target wants has
+# been dealt with: units/.booting goes and units/.up is there, which is what
+# a login waits for (cmd_hook).  Stopped, as the user's s6 is, by SIGTERM
+# (unit-pam passes it on): dinit stops its services and exits.  Its control
+# socket is $st/dinitctl; its log, $st/dinit.log; what the services that
+# have no logger of their own write goes to its output, which is this
+# manager's, as with s6.
+session_dinit() {
+  local st=$1 db=$2
+  mkdir -p "$st/units" "${XDG_STATE_HOME:-$HOME/.local/state}/s6"
+  # (leftovers of an earlier manager of this user)
+  rm -rf "$st/db" "$st/dinitctl" "$st/units/.up" "$st/units/.sv"
+  : > "$st/units/.booting"
+  ln -s "$db" "$st/db" || { log "cannot link the database"; exit 1; }
+  # --user: also for root's manager, which would be a system manager by
+  # default; --quiet with warnings: failures reach the log of the system's
+  # user-managers service, as s6-rc's did
+  exec @dinit@ --user \
+    -d "$st/db/dinit" \
+    -p "$st/dinitctl" \
+    --log-file "$st/dinit.log" \
+    --quiet --console-level warn \
+    -t boot
+}
+
 # Services up behind s6-rc's back: what a socket brought up while the login's
 # transaction held the lock was started with s6-svc -u (see systemctl's
 # start), and s6-rc counts it down.  s6-rc-update would then replace its
@@ -436,7 +513,15 @@ adopt_strays() {
 # system's; then run the user activation again, as it does for everybody.
 cmd_user_switch() {
   local st=${UNIT_USER_STATE:?} new live old unit hash restart reload stop atoms atom
-  new=$(readlink -f /run/current-system/s6-db)/user
+  new=$(user_db) || exit 0
+  if [[ -L $st/db ]]; then
+    # dinit --user
+    [[ -d $new/dinit ]] && user_switch_dinit "$st" "$new"
+    PATH=$PATH:$DEFAULT_PATH systemctl --user restart nixos-activation.service > /dev/null 2>&1 || true
+    return 0
+  fi
+  # (a manager of s6 on a configuration of dinit, started before the system
+  # went over: it stays as it is until it stops)
   [[ -d $new/compiled ]] || exit 0
   live=$(readlink -f "$st/db/index.tsv" 2>/dev/null) || live=
   old=${live%/*}
@@ -487,11 +572,80 @@ cmd_user_switch() {
   PATH=$PATH:$DEFAULT_PATH systemctl --user restart nixos-activation.service > /dev/null 2>&1 || true
 }
 
+# (as the user) The same for dinit --user, as switch-to-configuration does it
+# for the system's dinit: the link moves to the new database; what dinit has
+# loaded and is described differently there is read again (dinitctl reload),
+# what is gone is stopped and unloaded; the units that changed are restarted
+# (or reloaded, with reloadIfChanged); what the new configuration starts and
+# is not up comes up, in the order of the ranks.
+user_switch_dinit() {
+  local st=$1 new=$2 old unit hash restart reload stop atoms kind type rank boot atom start a name
+  local dc=(@dinitctl@ -p "$st/dinitctl")
+  old=$(readlink -f "$st/db" 2>/dev/null) || old=
+  [[ -n $old && $old != "$new" ]] || return 0
+  [[ -S $st/dinitctl ]] || { log "no dinit to switch in $st"; return 1; }
+  local UP LOADED restarts=() reloads=() gone=()
+  dinit_listing "${dc[@]}"
+  if [[ -r $old/switch.tsv && -r $new/switch.tsv ]]; then
+    local -A old_hash=()
+    while IFS=$'\t' read -r unit hash restart reload stop atoms; do old_hash[$unit]=$hash; done < "$old/switch.tsv"
+    while IFS=$'\t' read -r unit hash restart reload stop atoms; do
+      [[ -n ${old_hash[$unit]-} && ${old_hash[$unit]} != "$hash" ]] || continue
+      [[ $restart == 1 ]] || continue
+      case $unit in *.target|*.device) continue ;; esac
+      dinit_name "${atoms%% *}"
+      [[ $UP == *" $DN "* ]] || continue
+      # (reloadIfChanged: see the s6 branch of cmd_user_switch)
+      if [[ $reload == 1 ]]; then reloads+=("$unit"); else restarts+=("$DN"); fi
+    done < "$new/switch.tsv"
+  fi
+
+  ln -sfn "$new" "$st/db" || { log "cannot move the link to the new database"; return 1; }
+  while IFS= read -r name; do
+    [[ -n $name ]] || continue
+    if [[ ! -e $new/dinit/$name ]]; then gone+=("$name"); continue; fi
+    cmp -s "$old/dinit/$name" "$new/dinit/$name" && continue
+    if ! "${dc[@]}" --quiet reload "$name" 2>/dev/null; then
+      # (a running service that cannot take the change - another kind of
+      # service, a requirement that is not up - is stopped first; it comes
+      # back with what starts it below)
+      "${dc[@]}" --quiet stop --force --ignore-unstarted "$name" > /dev/null 2>&1
+      "${dc[@]}" --quiet reload "$name" > /dev/null 2>&1 || log "dinit cannot read $name again"
+    fi
+  done <<< "$LOADED"
+  for name in ${gone[@]+"${gone[@]}"}; do
+    "${dc[@]}" --quiet stop --force --ignore-unstarted "$name" > /dev/null 2>&1
+    "${dc[@]}" --quiet unload "$name" > /dev/null 2>&1
+  done
+  # (--force: what requires it is restarted with it, as with systemd)
+  for name in ${restarts[@]+"${restarts[@]}"}; do
+    "${dc[@]}" --quiet restart --force "$name" > /dev/null 2>&1 || log "restart of $name failed"
+  done
+
+  # what the new default.target wants (the loggers come with what they log)
+  dinit_listing "${dc[@]}"
+  while read -r _ atom; do
+    dinit_name "$atom"
+    [[ $UP == *" $DN "* ]] && continue
+    "${dc[@]}" --quiet start "$DN" > /dev/null 2>&1 || log "$atom did not start"
+    UP+="$DN "
+  done < <(while IFS=$'\t' read -r unit kind type rank boot atom atoms start; do
+             [[ $boot == 1 ]] || continue
+             for a in $atoms; do [[ $a == *-log ]] || printf '%s %s\n' "$rank" "$a"; done
+           done < "$new/index.tsv" | sort -n)
+
+  for unit in ${reloads[@]+"${reloads[@]}"}; do
+    PATH=$PATH:$DEFAULT_PATH systemctl --user reload "$unit" > /dev/null 2>&1 \
+      || log "reload of $unit failed"
+  done
+}
+
 # (as root) every running manager, as its user
 cmd_switch_all() {
   local d uid name gid home shell
   for d in "$STATES"/*; do
-    [[ -d $d/s6-rc ]] || continue
+    # (an s6 tree has its live directory, a dinit --user its link)
+    [[ -d $d/s6-rc || -L $d/db ]] || continue
     uid=${d##*/}
     lookup "$uid" || continue
     setpriv --reuid "$uid" --regid "$gid" --init-groups \

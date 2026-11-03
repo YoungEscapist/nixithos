@@ -9,13 +9,14 @@
 # is there for whoever wants a service stopped together with everything that
 # depends on it.
 #
-# Under dinit (the system's manager, when nixithos.init = "dinit"; the
-# managers of users are s6 either way), starting, stopping and restarting go
-# through dinitctl, which knows requirement from ordering: what requires a
+# Under dinit (the system's manager when nixithos.init = "dinit", and then
+# the managers of users too: dinit --user), starting, stopping and restarting
+# go through dinitctl, which knows requirement from ordering: what requires a
 # unit stops and restarts with it, as with systemd.  The processes of a unit
-# run under unit-supervise, whose status file (/run/units/.sv/ATOM) says
-# whether they run; a unit whose process has ended for good stays "started"
-# to dinit, and its supervisor starts it again when told (SIGUSR1).
+# run under unit-supervise, whose status file (/run/units/.sv/ATOM, a user's
+# in their manager's units/.sv) says whether they run; a unit whose process
+# has ended for good stays "started" to dinit, and its supervisor starts it
+# again when told (SIGUSR1).
 
 PATH=@path@:$PATH
 RUNTIME=@runtime@
@@ -26,9 +27,14 @@ STATE=/run/units
 SCAN=/run/service
 LOGDIR=/var/log/s6
 LIVE=/run/s6-rc
-# s6 or dinit: which of the two runs the services of the scope in use
+# when each timer went off last (unit-timer's stamps; see the runtime)
+TIMERS=/var/lib/units/timers
+# s6 or dinit: which of the two runs the services of the scope in use (with
+# --user, the user's manager: an s6 tree, or dinit --user)
 INIT=s6
 DINITCTL=(dinitctl -p /run/dinitctl)
+# (--user) whether the user has a manager running
+USER_MANAGER=0
 
 # s6-rc against the service manager of the scope in use (the system's, or
 # with --user the one of the logged-in user)
@@ -56,15 +62,28 @@ discover() {
     SCAN=$ust/service
     LIVE=$ust/s6-rc
     LOGDIR=${XDG_STATE_HOME:-$HOME/.local/state}/s6
-    # The manager is started by the session and may still be coming up.
+    TIMERS=${XDG_STATE_HOME:-$HOME/.local/state}/units/timers
+    # The manager is started by the session and may still be coming up: an
+    # s6 tree has its live directory, a dinit --user its control socket.
     for i in $(seq 150); do
-      [[ -e $LIVE/compiled ]] && break
+      [[ -e $LIVE/compiled || -S $ust/dinitctl ]] && break
       if [[ ! -d /run/user-managers/user-$(id -u) ]]; then
         # nobody is starting one
         (( i > 3 )) && break
       fi
       sleep 0.1
     done
+    if [[ -L $ust/db && ! -e $LIVE/compiled ]]; then
+      # dinit --user: the link to the database it runs on is in its
+      # directory, and the unit data names it through UNIT_USER_STATE
+      INIT=dinit
+      DINITCTL=(dinitctl -p "$ust/dinitctl")
+      DB=$(readlink -f "$ust/db")
+      export UNIT_USER_STATE=$ust
+      [[ -S $ust/dinitctl ]] && USER_MANAGER=1
+      return
+    fi
+    [[ -e $LIVE/compiled ]] && USER_MANAGER=1
   fi
   if (( ! opt_user )) && [[ -L $STATE/.db && ! -e $LIVE/compiled ]]; then
     # dinit: its init points /run/units/.db at the database in use
@@ -335,7 +354,7 @@ unit_state() {
   # marking the unit yet: for a caller that waits for the unit (the test
   # driver's wait_for_unit), it is being started, not "inactive with no jobs".
   if [[ $active_state == inactive && ${I_KIND[$1]-} == service && ${1%.service} != *@* ]]; then
-    local stamp=/var/lib/units/timers/${1%.service}.timer mt
+    local stamp=$TIMERS/${1%.service}.timer mt
     if [[ -e $stamp ]]; then
       mt=$(stat -c %Y "$stamp" 2>/dev/null) || mt=0
       if (( EPOCHSECONDS - mt <= 3 )); then
@@ -878,7 +897,7 @@ do_show() {
   if [[ ${I_KIND[$u]} == timer ]]; then
     # when it last went off: the stamp unit-timer touches (kept over reboots,
     # so the monotonic time is 0 for what happened before this boot)
-    local stamp=/var/lib/units/timers/$u mt bt last_real= last_mono=0
+    local stamp=$TIMERS/$u mt bt last_real= last_mono=0
     if [[ -e $stamp ]]; then
       mt=$(stat -c %Y "$stamp")
       bt=$(awk '/^btime/ { print $2 }' /proc/stat)
@@ -986,11 +1005,11 @@ detach() {
   (
     setsid "$BASH" -c 'exec "$@"' _ \
       "$0" ${extra[@]+"${extra[@]}"} "$verb" "${units[@]}" > /dev/null 2>&1 &
-    echo "$!" > /sys/fs/cgroup/cgroup.procs 2>/dev/null
+    echo "$!" 2>/dev/null > /sys/fs/cgroup/cgroup.procs
   )
 }
 
-if (( opt_user )) && [[ ! -e $LIVE/compiled ]]; then
+if (( opt_user && ! USER_MANAGER )); then
   # no manager for this user (not in a session, or user services are off)
   case $verb in
     is-active|is-failed|status) exit 3 ;;
@@ -1181,7 +1200,7 @@ EOF
       [[ ${I_KIND[$u]} == timer ]] || continue
       unit_state "$u"
       last=-
-      [[ -e /var/lib/units/timers/$u ]] && last=$(date -r "/var/lib/units/timers/$u" '+%Y-%m-%d %H:%M:%S')
+      [[ -e $TIMERS/$u ]] && last=$(date -r "$TIMERS/$u" '+%Y-%m-%d %H:%M:%S')
       printf '%-36s %-10s %s\n' "$u" "$active_state" "$last"
     done ;;
   list-jobs)

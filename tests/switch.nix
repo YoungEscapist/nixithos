@@ -159,6 +159,11 @@
             assert pid(u) == before[u], f"{u} was restarted by the switch ({before[u]} -> {pid(u)})"
         failed = machine.succeed("systemctl list-units --failed --no-legend").strip()
         assert failed == "", f"failed units:\n{failed}"
+        if init == "dinit":
+            # (nothing the switch took down along the way stays down: a target
+            # is just "inactive" to systemctl)
+            down = machine.succeed("dinitctl list | grep -F '{X}' || true").strip()
+            assert down == "", f"dinit services down after the switch:\n{down}"
 
     with subtest("and back"):
         print(machine.succeed("/run/booted-system/bin/switch-to-configuration test 2>&1"))

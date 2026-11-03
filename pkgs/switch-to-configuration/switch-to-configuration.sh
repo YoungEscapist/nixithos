@@ -72,7 +72,9 @@ running_init=s6
 [[ -L $STATE/.db && ! -e /run/s6-rc/compiled ]] && running_init=dinit
 new_init=s6
 [[ -d $new_db/dinit ]] && new_init=dinit
-DINITCTL=(dinitctl -p /run/dinitctl)
+# (a command to dinit that does not come back - a service that never gets to
+# where it is going - is a warning, not a switch that hangs for good)
+DINITCTL=(timeout 300 dinitctl -p /run/dinitctl)
 
 if [[ $running_init == dinit ]]; then
   live=$(readlink -f "$STATE/.db" 2>/dev/null) || live=
@@ -310,7 +312,16 @@ if [[ $running_init == dinit ]]; then
     done <<< "$("${DINITCTL[@]}" list 2>/dev/null)"
     for name in ${gone[@]+"${gone[@]}"}; do
       "${DINITCTL[@]}" --quiet stop --force --ignore-unstarted "$name"
-      "${DINITCTL[@]}" --quiet unload "$name" 2>/dev/null
+    done
+    # (a service is unloaded only once what refers to it is: as many rounds
+    # as it takes)
+    while (( ${#gone[@]} )); do
+      left=()
+      for name in "${gone[@]}"; do
+        "${DINITCTL[@]}" --quiet unload "$name" 2>/dev/null || left+=("$name")
+      done
+      (( ${#left[@]} < ${#gone[@]} )) || break
+      gone=(${left[@]+"${left[@]}"})
     done
   fi
   for unit in ${restart[@]+"${restart[@]}"}; do
@@ -355,6 +366,26 @@ if [[ $running_init == dinit ]]; then
              printf '%s %s\n' "${NEW_UNIT_RANK[$unit]}" "$unit"
            done | sort -n)
   start_atoms=()
+  # What the stops and restarts above took down with them (dependents
+  # stopped by --force: nscd's nss-lookup.target, say) comes back: whatever
+  # the new system starts at boot and dinit does not have started.
+  listing=$("${DINITCTL[@]}" list 2>/dev/null)
+  up=" "
+  while IFS= read -r line; do
+    [[ ${line:2:1} == [+s] ]] || continue
+    line=${line:11}
+    up+="${line%% *} "
+  done <<< "$listing"
+  while read -r _ unit; do
+    for atom in ${NEW_ATOMS[$unit]}; do
+      [[ $atom == *-log ]] && continue
+      is_up "$atom" && continue
+      dname "$atom"
+      "${DINITCTL[@]}" --quiet start "$DN" || rc=4
+    done
+  done < <(for unit in "${!NEW_BOOT[@]}"; do
+             [[ ${NEW_BOOT[$unit]} == 1 ]] && printf '%s %s\n' "${NEW_UNIT_RANK[$unit]}" "$unit"
+           done | sort -n)
 fi
 if (( ${#start_atoms[@]} )); then
   now_up=" $(s6-rc -b -a list | tr '\n' ' ') "
