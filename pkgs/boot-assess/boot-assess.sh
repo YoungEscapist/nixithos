@@ -331,19 +331,56 @@ grub_failed() {
 
 lim_conf() { echo "$bootDir/limine/limine.conf"; }
 
-# the number Limine gives the entry of TOPLEVEL (it counts every line that
-# starts with /, directories too)
+# the number of the entry of TOPLEVEL among all the lines that start with /
+# (what lim_entry takes)
 lim_index() {
     awk -v want="init=$1/init" '
       /^\/+/ { n++ }
       /^[ \t]*cmdline:/ { for (i = 2; i <= NF; i++) if ($i == want) { print n; exit } }' "$(lim_conf)"
 }
 
-lim_set_default() { # INDEX
-    local conf tmp
+# Makes the entry of TOPLEVEL Limine's default.  default_entry counts the
+# entries that show: a directory is one, what is in it only if it is open (a
+# `+` after the slashes), and the installer opens only the newest
+# generation's.  So the directories above the entry are opened, and the
+# number is of the entry among those that show.
+lim_pin() {
+    local conf tmp out
     conf=$(lim_conf)
     tmp=$conf.nixith.$$
-    sed "s/^default_entry:.*/default_entry: $1/" "$conf" > "$tmp" && mv -f "$tmp" "$conf"
+    out=$(awk -v want="init=$1/init" -v out="$tmp" '
+      { l[NR] = $0 }
+      END {
+        for (i = 1; i <= NR && !leaf; i++) {
+          if (l[i] ~ /^\/+/) {
+            match(l[i], /^\/+/); h[RLENGTH] = i; top = RLENGTH
+          } else if (l[i] ~ /^[ \t]*cmdline:/) {
+            m = split(l[i], f, " ")
+            for (j = 2; j <= m; j++) if (f[j] == want) { leaf = i; break }
+          }
+        }
+        if (!leaf) exit 1
+        for (k = 1; k < top; k++) mark[h[k]] = 1
+        n = 0
+        for (i = 1; i <= NR; i++) {
+          line = l[i]
+          if ((i in mark) && match(line, /^\/+/) && substr(line, RLENGTH + 1, 1) != "+")
+            line = substr(line, 1, RLENGTH) "+" substr(line, RLENGTH + 1)
+          if (line ~ /^\/+/) {
+            match(line, /^\/+/); d = RLENGTH
+            e = (substr(line, d + 1, 1) == "+")
+            vis = (d == 1) || (v[d - 1] && x[d - 1])
+            v[d] = vis; x[d] = e
+            if (vis) n++
+            cur = vis ? n : 0
+          } else if (i == leaf) idx = cur
+          print line > out
+        }
+        print idx
+      }' "$conf") || { rm -f "$tmp"; return 1; }
+    [[ $out =~ ^[0-9]+$ && $out -gt 0 ]] || { rm -f "$tmp"; return 1; }
+    sed -i "s/^default_entry:.*/default_entry: $out/" "$tmp"
+    mv -f "$tmp" "$conf"
 }
 
 # the lines of the entry INDEX: K kernel, C cmdline, M module, tab separated
@@ -377,15 +414,13 @@ lim_efi_path() {
 }
 
 lim_arm() { # TOPLEVEL GOOD
-    local top=$1 good=$2 conf ti gi kind val m kernel= cmdline= initrds=() src name part disk out b
+    local top=$1 good=$2 conf ti kind val m kernel= cmdline= initrds=() src name part disk out b
     conf=$(lim_conf)
     [[ -n $efiSupport ]] || { reason="Limine without EFI cannot start something once"; return 1; }
     [[ -n $efibootmgr && -d /sys/firmware/efi/efivars ]] || { reason="the firmware's variables cannot be written (efivars)"; return 1; }
     [[ -f $conf ]] || { reason="there is no $conf"; return 1; }
     ti=$(lim_index "$top")
-    gi=$(lim_index "$good")
     [[ -n $ti ]] || { reason="limine.conf has no entry for the new generation"; return 1; }
-    [[ -n $gi ]] || { reason="limine.conf has no entry for the generation that runs"; return 1; }
     while IFS=$'\t' read -r kind val; do
         case $kind in
             K) kernel=$(lim_efi_path "$val") || { reason="the kernel is not on the ESP"; return 1; } ;;
@@ -410,7 +445,7 @@ lim_arm() { # TOPLEVEL GOOD
     b=$(sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} NixithOS trial.*/\1/p' <<< "$out" | head -n1)
     [[ -n $b ]] || { reason="efibootmgr did not make the entry"; return 1; }
     "$efibootmgr" -n "$b" > /dev/null 2>&1 || { reason="BootNext cannot be set"; return 1; }
-    lim_set_default "$gi"
+    lim_pin "$good" || { reason="Limine's default cannot be set to the generation that runs"; return 1; }
     sync -f "$bootDir" 2> /dev/null || true
     return 0
 }
@@ -418,11 +453,9 @@ lim_arm() { # TOPLEVEL GOOD
 lim_clean() { lim_drop_trial; return 0; }
 
 lim_good() { # TOPLEVEL
-    local i
     lim_drop_trial
     if [[ -f $(lim_conf) ]]; then
-        i=$(lim_index "$1")
-        [[ -n $i ]] && lim_set_default "$i"
+        lim_pin "$1" || say "Limine's default cannot be set to $(describe "$1")"
         sync -f "$bootDir" 2> /dev/null || true
     fi
     return 0
