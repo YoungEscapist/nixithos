@@ -710,6 +710,9 @@ do_start() {
     for u in "${list[@]}"; do direct_start "$u" || rc=1; done
     return $rc
   fi
+  # (what s6-rc had up before: only those are run again below)
+  local -A was_up=()
+  for u in "${list[@]}"; do is_rc_up "${I_ATOM[$u]}" && was_up[$u]=1; done
   rc_start "${list[@]}" || rc=1
   load_rc
   for u in "${list[@]}"; do
@@ -721,8 +724,15 @@ do_start() {
     case $active_state in
       active|activating) ;;
       *)
-        # s6-rc has it as up, but it was stopped by hand, has failed, or is a
-        # job that has run to completion: run it again.
+        if [[ -z ${was_up[$u]-} ]] && is_rc_up "${I_ATOM[$u]}"; then
+          # s6-rc has just run it: a job that ran to completion is done (and
+          # is not run a second time - restic's backup was, and failed), one
+          # that failed has failed
+          [[ $active_state == failed ]] && rc=1
+          continue
+        fi
+        # s6-rc has had it up, but it was stopped by hand, has failed, or is
+        # a job that has run to completion: run it again.
         [[ ${I_KIND[$u]} == target || ${I_KIND[$u]} == device ]] || direct_start "$u" || rc=1 ;;
     esac
   done

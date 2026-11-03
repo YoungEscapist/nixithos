@@ -16,7 +16,7 @@ fi
 
 # parse_options ARGS…: sets what who why mode list, and rest to the command
 parse_options() {
-  what="idle:sleep:shutdown" who= why="Unknown reason" mode=block list=0 rest=()
+  what="idle:sleep:shutdown" who= why="Unknown reason" mode=block list=0 legend=1 rest=()
   while (( $# )); do
     case $1 in
       --what=*) what=${1#*=} ;;
@@ -28,7 +28,8 @@ parse_options() {
       --why) shift; why=${1-} ;;
       --mode) shift; mode=${1-} ;;
       --list) list=1 ;;
-      --no-pager|--no-legend|--no-ask-password) ;;
+      --no-legend) legend=0 ;;
+      --no-pager|--no-ask-password) ;;
       --) shift; break ;;
       -*) ;;
       *) break ;;
@@ -40,6 +41,10 @@ parse_options() {
 }
 
 parse_options "$@"
+# (as systemd's: with no command to run, the locks are listed - restic's test
+# looks for its own that way)
+(( ${#rest[@]} )) || list=1
+show_legend=$legend
 
 if (( list )); then
   n=0 rows=()
@@ -52,6 +57,7 @@ if (( list )); then
     # (the shell running this script: its argument is the script's path)
     (( ${#args[@]} > 1 )) && [[ ${args[1]} == */systemd-inhibit ]] || continue
     parse_options "${args[@]:2}"
+    # (another listing, or one without a command: nothing held)
     (( list )) && continue
     (( ${#rest[@]} )) || continue
     uid=$(stat -c %u "$d" 2>/dev/null) || continue
@@ -60,14 +66,12 @@ if (( list )); then
     n=$(( n + 1 ))
   done
   {
-    printf 'WHO\tUID\tUSER\tPID\tCOMM\tWHAT\tWHY\tMODE\n'
+    (( show_legend )) && printf 'WHO\tUID\tUSER\tPID\tCOMM\tWHAT\tWHY\tMODE\n'
     (( n )) && printf '%s\n' "${rows[@]}"
   } | column -t -s $'\t'
-  printf '\n%d inhibitors listed.\n' "$n"
+  (( show_legend )) && printf '\n%d inhibitors listed.\n' "$n"
   exit 0
 fi
-
-(( ${#rest[@]} )) || { echo "systemd-inhibit: no command given" >&2; exit 1; }
 
 # in the background, but with this standard input, not /dev/null
 "${rest[@]}" <&0 &
