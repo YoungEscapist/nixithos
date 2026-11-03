@@ -44,6 +44,8 @@ Building the system:
 The rest:
   parts             what the running system was built from, part by part
   generations       the generations of the system
+  boot-status       the boot assessment: what is on trial, what was rolled
+                    back (--ack forgets a rollback)
   install           install the configuration in /mnt (nixos-install; --root DIR)
   generate-config   write configuration.nix and hardware-configuration.nix
                     to /etc/nixith (--root DIR, --dir DIR, --show-hardware-config)
@@ -72,6 +74,14 @@ default_flake() {
     local root=${1:-}
     if [ -z "${NIXITH_CONFIG:-}" ] && [ -e "$root/etc/nixith/flake.nix" ]; then
         echo "$root/etc/nixith"
+    fi
+}
+
+# The boot assessment (nixithos.bootAssessment) of the running system: a
+# generation that did not boot and was rolled back, one that is on trial.
+boot_note() {
+    if command -v nixith-boot-assess > /dev/null 2>&1; then
+        nixith-boot-assess note || true
     fi
 }
 
@@ -175,6 +185,10 @@ build_system() {
         switch | boot | test | dry-activate | rollback)
             [ "$(id -u)" = 0 ] || die "$action changes the system: run it as root (sudo nixith $action)"
             ;;
+    esac
+
+    case $action in
+        switch | boot | test) boot_note ;;
     esac
 
     local profilePath=$profiles/$profile
@@ -446,6 +460,14 @@ case $command in
     parts) parts "$@" ;;
     generations | list-generations)
         generations "$@"
+        boot_note
+        ;;
+    boot-status)
+        command -v nixith-boot-assess > /dev/null 2>&1 || die "this system has no boot assessment (nixithos.bootAssessment.enable)"
+        if [ "${1:-}" = --ack ]; then
+            exec nixith-boot-assess ack
+        fi
+        exec nixith-boot-assess status
         ;;
     install) install_system "$@" ;;
     generate-config) generate_config "$@" ;;

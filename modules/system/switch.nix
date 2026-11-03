@@ -29,7 +29,7 @@ in
             --set OUT $out \
             --set TOPLEVEL ''${!toplevelVar} \
             --set DISTRO_ID ${lib.escapeShellArg config.system.nixos.distroId} \
-            --set INSTALL_BOOTLOADER ${lib.escapeShellArg config.system.build.installBootLoader} \
+            --set INSTALL_BOOTLOADER ${lib.escapeShellArg config.nixithos.bootAssessment.installer} \
             --set PRE_SWITCH_CHECK ${lib.escapeShellArg config.system.preSwitchChecksScript} \
             ${
               lib.optionalString (

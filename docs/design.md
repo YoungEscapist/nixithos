@@ -416,6 +416,62 @@ What ends up in the closure is about a dozen small paths: the package
 itself, glibc, openssl, util-linux (`lib` and `login`), libidn2,
 libunistring, libxcrypt, libgcc.
 
+## Boot assessment
+
+A generation that was just installed to boot from can be put "on trial"
+(`nixithos.bootAssessment.enable`, off by default, `tries` = 3): if a boot
+into it does not get to the end, the boot loader goes back to the generation
+that was running, by itself. The same on s6 and dinit; the tool is
+`pkgs/boot-assess` (`nixith-boot-assess`), the module
+`modules/system/boot-assessment.nix`.
+
+- **Arming.** `switch-to-configuration` runs the boot loader installer through
+  a wrapper that calls `nixith-boot-assess arm TOPLEVEL` after it. Nothing is
+  armed if the new system is the one that runs, in a chroot (`nixos-install`:
+  there is no `/run/booted-system`), or if the loader's own menu has no entry
+  to fall back to; it says so, and the install goes on as it did.
+- **The end of the boot.** s6: `rc.init`, after the steady database and the
+  units that were held back; dinit: the `boot` service. Both run the program
+  `/etc/units/boot-hook` names with `good`. A boot is good when it got there
+  and the units of `nixithos.bootAssessment.requiredUnits` are active (none by
+  default: a broken optional unit is no reason to go back). A trial that is
+  good stops being one; a trial that is over (tries used up) while an older
+  generation boots is a **rollback**: it is written down
+  (`/var/lib/nixith/boot-assessment/rolled-back`), the system profile is set
+  back to the generation that runs, and `nixith` reports it (`nixith
+  boot-status`, and a note on `switch`/`boot`/`generations`).
+- **systemd-boot.** Its own boot counting: the new entry's file is renamed
+  `nixos-generation-N+3.conf`; the loader counts it down at each boot and
+  sorts an entry with 0 left last; `good` takes the `+N` off. The installer
+  writes every entry anew and never removes counted ones, so the tool
+  deletes the plain twin of a counted entry and the counted entries of
+  generations that are gone. There is no `systemd-bless-boot`; renaming is
+  all it does.
+- **GRUB.** `grubenv` (`nixith_trial`, `nixith_good`, `nixith_tries`) and a
+  piece of `grub.cfg` (`boot.loader.grub.extraConfig`) that counts down and
+  saves before booting, picks the trial entry, and when none is left the
+  old one. The tool gives the menu entries `--id`s (a pass over `grub.cfg`).
+  If `grubenv` cannot be written (the value read back is not the one saved)
+  the trial is given up rather than repeated for ever. A rollback leaves
+  `nixith_tries=0`, which keeps sending the failed first entry to the good
+  one until the next install writes `grub.cfg` anew.
+- **Limine.** It remembers nothing and counts nothing. The old generation is
+  its `default_entry`; the new one is started **once** through a UEFI boot
+  entry for its kernel (EFI stub, command line and `initrd=` taken from the
+  Limine entry; `efibootmgr -C`, then `-n` = BootNext). A boot that does not
+  get to the end falls back to Limine's default by itself. `good` makes the
+  new generation the `default_entry` and deletes the trial entry. Needs EFI
+  and writable firmware variables, and a config that is not enrolled
+  (`enrollConfig`); without them nothing is armed.
+- **rEFInd, others.** Not supported (the option asserts). The Limine scheme
+  would fit rEFInd; untested.
+
+What it does not cover: a failure before the boot loader's counting means
+anything (firmware, a boot loader that is itself broken), and a machine that
+hangs instead of resetting waits for someone to reset it (`panic=` helps for
+a panic). The previous generation has to be one that can tell (it needs the
+feature itself to report a rollback; the loader falls back either way).
+
 ## Users of dynamic services
 
 systemd hands out a `DynamicUser=` user for the lifetime of the service and
@@ -770,6 +826,10 @@ user-manager session  (as the user)
 - `bootloader`: an installed system: GRUB (BIOS), Limine and systemd-boot
   (UEFI) boot into s6, `switch-to-configuration boot` reinstalls the boot
   loader, reboot;
+- `rollback-systemd-boot`, `rollback-grub`, `rollback-limine`: boot
+  assessment (`dinit.rollback-*` the same on dinit): generations that reset
+  the machine in stage 2 or whose required unit fails are tried and given up
+  on, one that boots stays the default;
 - `module`, `module-units`: `boot` and `units` with nodes from the stock
   nixpkgs module list and `nixosModules.default`;
 - `rebuild`: `boot` in `"rebuild"` mode; not part of the main suite (hours
