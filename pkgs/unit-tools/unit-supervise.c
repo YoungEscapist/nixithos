@@ -83,6 +83,9 @@ static int with_finish, with_hook, hook_done;
 static enum phase phase = P_WAIT;
 static pid_t child = -1;       /* run, or finish */
 static int want_up = 1, stay = 0, ready = 0, told = 0;
+/* dinit gave up waiting for the start (start-timeout: SIGINT before the
+ * service was ready): finish hears "timeout", and the unit failed */
+static int timed_out = 0;
 static int ready_fd = -1;      /* read end of the process's pipe */
 static long long last_start = 0, kill_at = 0, next_start = 0;
 
@@ -195,7 +198,7 @@ static void start_finish(int code, int signum) {
     setsid();
     if (chdir("/") < 0) {}
     /* (unit-runtime keeps this one of the environment) */
-    setenv("UNIT_SV_WANT", want_up ? "up" : "down", 1);
+    setenv("UNIT_SV_WANT", timed_out ? "timeout" : want_up ? "up" : "down", 1);
     execl(runtime, runtime, "finish", data, c, s, (char *)NULL);
     _exit(127);
   }
@@ -422,8 +425,10 @@ int main(int argc, char **argv) {
               if (pid == child) on_exit_status(status);
             break;
           }
-          case SIGTERM:
           case SIGINT:
+            if (!told && mgr_fd >= 0) timed_out = 1;
+            /* fall through */
+          case SIGTERM:
           case SIGUSR2:
             want_up = 0;
             stay = si.ssi_signo == SIGUSR2;

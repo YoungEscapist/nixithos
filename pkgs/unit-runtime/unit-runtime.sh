@@ -1501,6 +1501,8 @@ cmd_finish() {
     # (unit-supervise says whether the service is wanted up)
     wanted=true
     [[ ${UNIT_SV_WANT-up} == down ]] && wanted=false
+    # (dinit gave up waiting for it to be ready: TimeoutStartSec=, a failure)
+    if [[ ${UNIT_SV_WANT-up} == timeout ]]; then wanted=false; result=timeout; clean=0; fi
     unset UNIT_SV_WANT
   else
     wanted=$(s6-svstat -o wantedup . 2>/dev/null) || wanted=true
@@ -1528,7 +1530,12 @@ cmd_finish() {
 
   if [[ $wanted != true ]]; then
     rmdir "$cg" 2>/dev/null
-    set_state inactive "$result"
+    if [[ $result == timeout ]]; then
+      msg "failed (timeout: not ready in time)"
+      set_state failed timeout
+    else
+      set_state inactive "$result"
+    fi
     exit 0
   fi
 
