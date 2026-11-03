@@ -55,7 +55,7 @@ let
     inherit (cfg) tries;
     required = cfg.requiredUnits;
     efiSupport = loader == "limine" && bl.limine.efiSupport;
-    grubPackage = if loader == "grub" then bl.grub.package else null;
+    grubPackage = if loader == "grub" then pkgs.grub2 else null;
     efibootmgr = if loader == "limine" then pkgs.efibootmgr else null;
   };
 

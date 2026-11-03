@@ -11,10 +11,10 @@
     };
 
   testScript =
-    { nodes, ... }:
+    { nodes, pkgs, ... }:
     ''
       init = "${nodes.machine.nixithos.init}"
-      editenv = "${nodes.machine.boot.loader.grub.package}/bin/grub-editenv /boot/grub/grubenv"
+      editenv = "${pkgs.grub2}/bin/grub-editenv /boot/grub/grubenv"
     ''
     + builtins.readFile ./configs/rollback-common.py
     + ''
