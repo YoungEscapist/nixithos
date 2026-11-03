@@ -5,9 +5,10 @@
   name = "rollback-limine";
 
   nodes.machine =
-    { ... }:
+    { pkgs, ... }:
     {
       imports = [ ./configs/rollback-node.nix ];
+      environment.systemPackages = [ pkgs.efibootmgr ];
       virtualisation.useEFIBoot = true;
       boot.loader.efi.canTouchEfiVariables = true;
       boot.loader.limine.enable = true;
@@ -15,10 +16,10 @@
     };
 
   testScript =
-    { nodes, pkgs, ... }:
+    { nodes, ... }:
     ''
       init = "${nodes.machine.nixithos.init}"
-      efibootmgr = "${pkgs.efibootmgr}/bin/efibootmgr"
+      efibootmgr = "efibootmgr"
     ''
     + builtins.readFile ./configs/rollback-common.py
     + ''

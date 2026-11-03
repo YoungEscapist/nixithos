@@ -5,16 +5,17 @@
   name = "rollback-grub";
 
   nodes.machine =
-    { ... }:
+    { pkgs, ... }:
     {
       imports = [ ./configs/rollback-node.nix ];
+      environment.systemPackages = [ pkgs.grub2 ];
     };
 
   testScript =
-    { nodes, pkgs, ... }:
+    { nodes, ... }:
     ''
       init = "${nodes.machine.nixithos.init}"
-      editenv = "${pkgs.grub2}/bin/grub-editenv /boot/grub/grubenv"
+      editenv = "grub-editenv /boot/grub/grubenv"
     ''
     + builtins.readFile ./configs/rollback-common.py
     + ''
