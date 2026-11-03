@@ -51,6 +51,7 @@ let
 
   assess = pkgs.nixithos.bootAssess.override {
     inherit loader bootDir;
+    espDir = bl.efi.efiSysMountPoint;
     inherit (cfg) tries;
     required = cfg.requiredUnits;
     efiSupport = loader == "limine" && bl.limine.efiSupport;

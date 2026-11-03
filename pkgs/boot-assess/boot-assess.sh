@@ -30,6 +30,7 @@ loader=@loader@
 tries=@tries@
 required=(@required@)
 bootDir=@bootDir@
+espDir=@espDir@
 efiSupport=@efiSupport@
 grubEditenv=@grubEditenv@
 efibootmgr=@efibootmgr@
@@ -111,6 +112,31 @@ sd_link_of_stem() {
     fi
 }
 
+# loader.conf's `default`: the installer names the entry of the generation it
+# installs for, and systemd-boot takes the entry that `default` names even when
+# it has no tries left (also `@saved`).  So while a generation is on trial
+# there is no `default`: the loader takes the first entry that is not bad, the
+# newest.  When the trial is over `default` names an entry again.
+sd_set_default() { # VALUE, or nothing: no `default`
+    local conf=$espDir/loader/loader.conf tmp
+    [[ -f $conf ]] || return 0
+    tmp=$conf.nixith.$$
+    grep -v '^default ' "$conf" > "$tmp"
+    [[ -z ${1-} ]] || echo "default $1" >> "$tmp"
+    mv -f "$tmp" "$conf"
+}
+
+sd_set_default_for() { # TOPLEVEL: its entry, as the installer would
+    local f
+    for f in $(sd_entries_for "$1"); do
+        sd_parse "$f"
+        [[ $s_stem == *-specialisation-* ]] && continue
+        sd_set_default "$s_stem.conf"
+        return 0
+    done
+    return 0
+}
+
 sd_arm() { # TOPLEVEL GOOD
     local top=$1 good=$2 dir f has_good=0 link
     dir=$(sd_dir)
@@ -158,6 +184,7 @@ sd_arm() { # TOPLEVEL GOOD
         armed=1
     done
     ((armed)) || { reason="the boot menu has no new entry for it"; return 1; }
+    sd_set_default
     return 0
 }
 
@@ -181,6 +208,7 @@ sd_good() { # TOPLEVEL: take the count off its entries
         [[ -n $s_left ]] || continue
         mv -f "$f" "$(sd_dir)/$s_stem.conf"
     done
+    sd_set_default_for "$1"
     sync -f "$bootDir" 2> /dev/null || true
     return 0
 }
@@ -195,7 +223,7 @@ sd_pending() {
     return 1
 }
 
-sd_failed() { return 0; }
+sd_failed() { sd_set_default_for "$2"; sync -f "$bootDir" 2> /dev/null || true; return 0; }
 
 # ---------------------------------------------------------------- grub
 
@@ -463,7 +491,7 @@ good_body() {
             gen=$(gen_of "$booted")
             [[ -n $gen ]] && ln -sfn "system-$gen-link" "$PROFILES/system"
         fi
-        backend failed "$trial"
+        backend failed "$trial" "$booted"
         rm -f "$STATE/trial"
         msg="$(describe "$trial") did not boot (not in $(sget rolled-back tries) tries); rolled back to $(describe "$booted")"
         say "$msg"

@@ -442,7 +442,10 @@ that was running, by itself. The same on s6 and dinit; the tool is
   boot-status`, and a note on `switch`/`boot`/`generations`).
 - **systemd-boot.** Its own boot counting: the new entry's file is renamed
   `nixos-generation-N+3.conf`; the loader counts it down at each boot and
-  sorts an entry with 0 left last; `good` takes the `+N` off. The installer
+  sorts an entry with 0 left last; `good` takes the `+N` off. A `default`
+  line in loader.conf would be taken even for an entry with none left (tried:
+  the machine reset for ever), so there is none while a generation is on
+  trial, and the loader takes the first entry that is not bad. The installer
   writes every entry anew and never removes counted ones, so the tool
   deletes the plain twin of a counted entry and the counted entries of
   generations that are gone. There is no `systemd-bless-boot`; renaming is

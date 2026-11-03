@@ -18,6 +18,7 @@
   # systemd-boot: where loader/entries is; grub: boot.loader.grub's path;
   # limine: the ESP
   bootDir ? "/boot",
+  espDir ? "/boot",
   efiSupport ? false,
   grubPackage ? null,
   efibootmgr ? null,
@@ -38,7 +39,7 @@ replaceVarsWith {
       gawk
       util-linux
     ];
-    inherit loader bootDir;
+    inherit loader bootDir espDir;
     tries = toString tries;
     required = lib.escapeShellArgs required;
     efiSupport = if efiSupport then "1" else "''";
