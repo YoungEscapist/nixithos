@@ -34,6 +34,15 @@
           };
         };
         echo.serviceConfig.ExecStart = "${pkgs.socat}/bin/socat ACCEPT-FD:3,fork EXEC:${pkgs.coreutils}/bin/cat";
+        # pipewire and wireplumber: pw comes with its socket, wp is WantedBy=
+        # pw and requires it too (the want is lost to the ordering cycle)
+        pw.serviceConfig.ExecStart = "${pkgs.socat}/bin/socat ACCEPT-FD:3,fork EXEC:${pkgs.coreutils}/bin/cat";
+        wp = {
+          wantedBy = [ "pw.service" ];
+          requires = [ "pw.service" ];
+          after = [ "pw.service" ];
+          serviceConfig.ExecStart = "${pkgs.coreutils}/bin/sleep 1000011";
+        };
         # what a timer runs
         tick.serviceConfig = {
           Type = "oneshot";
@@ -61,6 +70,10 @@
       systemd.user.sockets.echo = {
         wantedBy = [ "sockets.target" ];
         listenStreams = [ "%t/echo.sock" ];
+      };
+      systemd.user.sockets.pw = {
+        wantedBy = [ "sockets.target" ];
+        listenStreams = [ "%t/pw.sock" ];
       };
       systemd.user.timers.tick = {
         wantedBy = [ "timers.target" ];
@@ -169,6 +182,12 @@
         user("systemctl --user stop echo.service")
         out = machine.succeed("echo pong | su alice -c 'socat -t 3 - UNIX-CONNECT:/run/user/1000/echo.sock'").strip()
         assert out == "pong", out
+        # what a socket-started service wants comes with it (wireplumber with
+        # pipewire), also when the want is lost to an ordering cycle
+        machine.fail("pgrep -u alice -f 'sleep 1000011'")
+        out = machine.succeed("echo pw | su alice -c 'socat -t 3 - UNIX-CONNECT:/run/user/1000/pw.sock'").strip()
+        assert out == "pw", out
+        machine.wait_until_succeeds("pgrep -u alice -f 'sleep 1000011'", timeout=30)
 
     with subtest("timers and OnFailure="):
         machine.wait_until_succeeds("test $(wc -l < /run/user/1000/tick.count) -ge 2", timeout=40)

@@ -502,6 +502,20 @@ dinit_start() {
     fi
   done
   if ! is_rc_up "$atom"; then
+    # What the unit wants (Wants=, WantedBy= of others) that dinit has no
+    # edge for: an ordering cycle cost it (wireplumber is WantedBy= pipewire
+    # and Requires= it), or there is no ordering at all, which waits-for
+    # would add.  s6-rc starts the unit's whole start set (rc_start); here
+    # those are started alongside, without waiting, dinit ordering them.
+    for a in ${I_START[$u]}; do
+      [[ $a == *-log ]] && continue
+      [[ " ${I_ATOMS[$u]} " == *" $a "* ]] && continue
+      if ! is_rc_up "$a"; then
+        dname "$a"
+        "${DINITCTL[@]}" --quiet start --no-wait "$DN" 2>/dev/null
+        rc_up+="$DN "
+      fi
+    done
     dname "$atom"
     "${DINITCTL[@]}" --quiet start "$DN" || rc=1
     rc_up+="$DN "
