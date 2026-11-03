@@ -14,8 +14,6 @@
         password = "wonderland";
       };
       users.users.root.openssh.authorizedKeys.keyFiles = [ ./configs/ssh-test-key.pub ];
-      # (for the poweroff typed at a console)
-      users.users.root.password = "queen";
     };
 
   nodes.client =
@@ -80,10 +78,9 @@
         # dinit, systemctl stops the units itself).
         server.send_key("alt-f2")
         server.wait_until_tty_matches("2", "login: ")
+        # (root of a test machine has no password: login lets it in at once)
         server.send_chars("root\n")
-        server.wait_until_tty_matches("2", "Password: ")
-        server.send_chars("queen\n")
-        server.wait_until_succeeds("pgrep -t tty2 -u root bash")
+        server.wait_until_succeeds("pgrep -t tty2 -u root bash", timeout=60)
         server.send_chars("poweroff\n")
         server.wait_for_shutdown()
   '';
