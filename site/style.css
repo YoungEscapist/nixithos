@@ -126,7 +126,7 @@ dl.cmds dd{margin:0;color:var(--muted);font-size:15.5px}
 .shots figcaption b{color:var(--ink);font-weight:600}
 
 /* installer choices */
-.choices{display:grid;grid-template-columns:repeat(5,1fr);gap:28px}
+.choices{display:grid;grid-template-columns:repeat(6,1fr);gap:28px}
 .choice h3{font-family:var(--font-mono);font-weight:500;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
 .choice ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .choice li{display:flex;justify-content:space-between;gap:8px;padding-block:6px;border-bottom:1px dashed var(--line)}

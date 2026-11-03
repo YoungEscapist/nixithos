@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>NixithOS</title>
-<meta name="description" content="NixithOS: NixOS без systemd, на s6-rc. Те же пакеты nixpkgs и та же конфигурация.">
+<meta name="description" content="NixithOS: NixOS без systemd, на s6-rc или dinit. Те же пакеты nixpkgs и та же конфигурация.">
 <link rel="icon" type="image/png" href="../favicon.png">
 <link rel="alternate" hreflang="en" href="https://youngescapist.github.io/nixithos/">
 <link rel="alternate" hreflang="ru" href="https://youngescapist.github.io/nixithos/ru/">
@@ -32,9 +32,9 @@
   <main id="top">
     <div class="hero">
       <div>
-        <p class="eyebrow">nixpkgs 26.05 · s6 + s6-rc · x86_64</p>
+        <p class="eyebrow">nixpkgs 26.05 · s6 или dinit · x86_64</p>
         <h1>NixOS без&nbsp;systemd</h1>
-        <p class="lead">Те же пакеты nixpkgs и та же декларативная конфигурация. Систему запускает и держит s6-rc, а всё остальное остаётся как в NixOS.</p>
+        <p class="lead">Те же пакеты nixpkgs и та же декларативная конфигурация. Систему запускает и держит s6-rc или, если выбрать, dinit, а всё остальное остаётся как в NixOS.</p>
         <div class="actions">
           <a class="btn primary" href="#download">Скачать ISO <small>1,8 ГБ</small></a>
           <a class="btn ghost" href="https://github.com/YoungEscapist/nixithos">Исходники</a>
@@ -52,8 +52,8 @@
         <table>
           <thead><tr><th scope="col"></th><th scope="col">NixOS</th><th scope="col">NixithOS</th></tr></thead>
           <tbody>
-            <tr><td>PID 1</td><td>systemd</td><td>s6-svscan</td></tr>
-            <tr><td>Службы</td><td>systemd-юниты</td><td>сервисы s6-rc; юниты модулей nixpkgs переводит <code>unitc</code></td></tr>
+            <tr><td>PID 1</td><td>systemd</td><td>s6-svscan или dinit</td></tr>
+            <tr><td>Службы</td><td>systemd-юниты</td><td>сервисы s6-rc или dinit; юниты модулей nixpkgs переводит <code>unitc</code></td></tr>
             <tr><td>Сеансы</td><td>systemd-logind</td><td>elogind</td></tr>
             <tr><td>Пересборка</td><td><code>nixos-rebuild switch</code></td><td><code>nixith switch</code>, можно частично через <code>--only</code></td></tr>
             <tr><td>Загрузчик</td><td>systemd-boot, GRUB</td><td>systemd-boot, GRUB, rEFInd, Limine</td></tr>
@@ -62,7 +62,7 @@
           </tbody>
         </table>
       </div>
-      <p class="note">Модули nixpkgs по-прежнему описывают службы как <code>systemd.services.*</code>. NixithOS собирает из этих описаний дерево s6-rc, поэтому <code>services.openssh.enable = true</code> работает без правок.</p>
+      <p class="note">Модули nixpkgs по-прежнему описывают службы как <code>systemd.services.*</code>. NixithOS собирает из этих описаний сервисы s6-rc или dinit, поэтому <code>services.openssh.enable = true</code> работает без правок. Какая из двух систем запускает машину — одна строка, <code>nixithos.init = "dinit";</code>, или шаг установщика.</p>
     </section>
 
     <section id="nixith">
@@ -94,7 +94,7 @@
     <section id="install">
       <div class="sec-head">
         <h2>Установщик</h2>
-        <p>Образ сам запускает установщик: небольшую программу в консоли, на русском или английском, со скриншотом каждого варианта, как их показывал Calamares. Шестнадцать коротких шагов, и до подтверждения итога на диск ничего не пишется.</p>
+        <p>Образ сам запускает установщик: небольшую программу в консоли, на русском или английском, со скриншотом каждого варианта, как их показывал Calamares. Семнадцать коротких шагов, и до подтверждения итога на диск ничего не пишется.</p>
       </div>
       <div class="shots">
         <figure class="wide">
@@ -118,7 +118,11 @@
           <figcaption><b>Рабочий стол.</b> Рядом со списком — скриншот выбранного варианта, здесь и у экрана входа, оболочки и загрузчика. Parallax есть на образе, остальные скачиваются во время установки.</figcaption>
         </figure>
         <figure>
-          <a href="../img/tui-summary.webp"><img src="../img/tui-summary.webp" width="1280" height="800" loading="lazy" alt="Шаг «Итог»: все ответы, среди них ядро Linux Zen, и диск, который будет стёрт"></a>
+          <a href="../img/tui-init.webp"><img src="../img/tui-init.webp" width="1280" height="800" loading="lazy" alt="Шаг «Init-система»: выбран dinit, выше s6, внизу описание dinit"></a>
+          <figcaption><b>Init-система.</b> s6, на котором построена NixithOS, или dinit. Обе работают с одной и той же конфигурацией, с теми же systemctl и журналами; сменить можно и потом — строкой и перезагрузкой.</figcaption>
+        </figure>
+        <figure>
+          <a href="../img/tui-summary.webp"><img src="../img/tui-summary.webp" width="1280" height="800" loading="lazy" alt="Шаг «Итог»: все ответы, среди них init-система dinit, и диск, который будет стёрт"></a>
           <figcaption><b>Итог.</b> Все ответы на одном экране и то, что будет стёрто.</figcaption>
         </figure>
         <figure>
@@ -175,13 +179,20 @@
             <li>XanMod</li>
           </ul>
         </div>
+        <div class="choice">
+          <h3>Init</h3>
+          <ul>
+            <li>s6 <span>s6-rc</span></li>
+            <li>dinit</li>
+          </ul>
+        </div>
       </div>
     </section>
 
     <section id="download">
       <div class="sec-head">
         <h2>Скачать</h2>
-        <p>Один образ для UEFI и BIOS, 1,8 ГБ, выпуск от 28 октября 2026. Запишите его на флешку (или положите на Ventoy) и загрузитесь с неё.</p>
+        <p>Один образ для UEFI и BIOS, 1,8 ГБ, выпуск от 3 ноября 2026. Запишите его на флешку (или положите на Ventoy) и загрузитесь с неё.</p>
       </div>
       <div class="download">
         <div>
