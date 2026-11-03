@@ -982,6 +982,20 @@ power() {
     dsd=${dsd%/*}/shutdown
     # -ff: at once, without stopping anything
     (( opt_force >= 2 )) && exec "$dsd" --system "$flag"
+    if (( ! opt_force )) && [[ ${__SYSTEMCTL_POWER-} != 1 ]]; then
+      # The units are stopped by this program, not by PID 1 (as rc.shutdown
+      # does for s6), and whoever asked is likely to be among them: a shell
+      # of a getty or of sshd, the test driver's backdoor.  When its unit
+      # stops, its control group is emptied, and the shutdown with it (it
+      # never got past the rank of the backdoor).  So it goes on out of the
+      # way, in a session and the root control group of its own; as with
+      # systemd, the request is made and not waited for.
+      (
+        __SYSTEMCTL_POWER=1 setsid "$BASH" -c 'exec "$@"' _ "$0" ${raw[@]+"${raw[@]}"} < /dev/null > /dev/null 2>&1 &
+        echo "$!" 2>/dev/null > /sys/fs/cgroup/cgroup.procs
+      )
+      exit 0
+    fi
     (( opt_force )) || dinit_stop_ordered
     exec "$dsd" "$flag"
   fi
