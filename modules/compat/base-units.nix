@@ -341,7 +341,12 @@ in
       systemd-tmpfiles-setup = lib.recursiveUpdate early {
         description = "Create System Files and Directories";
         wantedBy = [ "sysinit.target" ];
-        after = [ "local-fs.target" ];
+        # (as systemd's own: the users and groups the rules name are there
+        # first - userborn is systemd-sysusers.service by an alias)
+        after = [
+          "local-fs.target"
+          "systemd-sysusers.service"
+        ];
         before = [ "sysinit.target" ];
         unitConfig.X-S6-Name = "tmpfiles-setup";
         serviceConfig = {

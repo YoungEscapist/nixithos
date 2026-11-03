@@ -84,7 +84,8 @@ let
   # module list, on binaries from the cache (s6.systemdPackages = "replace"),
   # which is what the tests are written for.  The tests themselves are
   # copies, so that their relative imports find it; all else is linked.
-  upstreamTree =
+  upstreamTreeFor =
+    init:
     let
       adapter = builtins.toFile "testing-python.nix" ''
         args@{
@@ -100,7 +101,9 @@ let
           testing = import ${toString ./lib/testing.nix} {
             nixpkgs = ${toString nixpkgs};
             inherit lib;
-            systemdPackages = "replace";
+            systemdPackages = "replace";${
+              lib.optionalString (init != "s6") " init = ${builtins.toJSON init};"
+            }
           };
           extraTestModule = {
             config.hostPkgs = pkgs;
@@ -134,7 +137,9 @@ let
         }
       '';
     in
-    hostPkgs.runCommand "nixpkgs-for-tests" { preferLocalBuild = true; } ''
+    hostPkgs.runCommand "nixpkgs-for-tests${lib.optionalString (init != "s6") "-${init}"}" {
+      preferLocalBuild = true;
+    } ''
       mkdir -p $out/nixos/lib
       for f in ${nixpkgs}/*; do
         n=$(basename "$f")
@@ -152,6 +157,25 @@ let
       cp -r ${nixpkgs}/nixos/tests $out/nixos/tests
       chmod -R u+w $out/nixos/tests
     '';
+
+  # nixpkgs' tests (all-tests.nix, with the arguments it gives each) on that
+  # tree for one init system
+  upstreamFor =
+    attr: init:
+    let
+      all = import "${upstreamTreeFor init}/nixos/tests/all-tests.nix" {
+        inherit system;
+        pkgs = hostPkgs;
+        callTest = config: config.test;
+      };
+      ours =
+        path: t:
+        if lib.isDerivation t && !(t.nixithos or false) then
+          throw "${attr}.${lib.concatStringsSep "." path} is not built through this tree"
+        else
+          t;
+    in
+    lib.mapAttrsRecursiveCond (t: !lib.isDerivation t) ours all;
 
 in
 {
@@ -212,21 +236,12 @@ in
   # package's own tests, checks of an evaluated configuration) would test
   # stock NixOS; they are refused.  Most of the tests assume systemd in
   # places; what they find is what is left to do.
-  upstream =
-    let
-      all = import "${upstreamTree}/nixos/tests/all-tests.nix" {
-        inherit system;
-        pkgs = hostPkgs;
-        callTest = config: config.test;
-      };
-      ours =
-        path: t:
-        if lib.isDerivation t && !(t.nixithos or false) then
-          throw "upstream.${lib.concatStringsSep "." path} is not built through this tree"
-        else
-          t;
-    in
-    lib.mapAttrsRecursiveCond (t: !lib.isDerivation t) ours all;
+  upstream = upstreamFor "upstream" "s6";
+
+  # …and the same tests with dinit as init (nixithos.init = "dinit"):
+  #
+  #   nix-build -A upstreamDinit.openssh
+  upstreamDinit = upstreamFor "upstreamDinit" "dinit";
 
   # the installation/live ISO (images/iso.nix)
   iso = (eval { modules = [ ./images/iso.nix ]; }).config.system.build.isoImage;

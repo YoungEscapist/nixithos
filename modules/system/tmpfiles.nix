@@ -104,7 +104,10 @@ in
     systemd.services."systemd-tmpfiles-resetup" = {
       description = "Re-setup tmpfiles on a system that is already running.";
       requiredBy = [ "sysinit-reactivation.target" ];
-      after = [ "local-fs.target" ];
+      after = [
+        "local-fs.target"
+        "systemd-sysusers.service"
+      ];
       before = [ "sysinit-reactivation.target" ];
       restartTriggers = [ config.environment.etc."tmpfiles.d".source ];
       unitConfig = {

@@ -272,17 +272,24 @@ resolve() {
 
 rc_up=
 rc_busy=0
+# (dinit) what it is starting, by dinit name
+rc_starting=
 load_rc() {
   if [[ $INIT == dinit ]]; then
     # what dinit has started, by dinit name ("[{+}     ] name …": the third
-    # character is + when started, s when its start was skipped)
+    # character is + when started, s when its start was skipped; the fifth
+    # and sixth are << while it is being started)
     local line name
     rc_up=" "
+    rc_starting=" "
     rc_busy=0
     while IFS= read -r line; do
-      [[ ${line:2:1} == [+s] ]] || continue
       name=${line:11}
-      rc_up+="${name%% *} "
+      if [[ ${line:2:1} == [+s] ]]; then
+        rc_up+="${name%% *} "
+      elif [[ ${line:4:2} == "<<" ]]; then
+        rc_starting+="${name%% *} "
+      fi
     done < <("${DINITCTL[@]}" list 2>/dev/null)
     return 0
   fi
@@ -303,6 +310,13 @@ is_rc_up() {
   else
     [[ $rc_up == *" $1 "* ]]
   fi
+}
+
+# (dinit) is it being started?
+is_rc_starting() {
+  [[ $INIT == dinit ]] || return 1
+  dname "$1"
+  [[ $rc_starting == *" $DN "* ]]
 }
 
 # DN: the name dinit knows ATOM $1 by (unitc's dname: `@`, `\`, `:` are not
@@ -368,7 +382,24 @@ unit_state() {
 unit_state_raw() {
   local u=$1 st= res=
   if [[ ${I_KIND[$u]-} == virtual ]]; then
-    if s6-svstat -o up "/run/user-managers/user-${VIRT_UID[$u]}" 2>/dev/null | grep -q true; then
+    local m=/run/user-managers/user-${VIRT_UID[$u]} name f i
+    # A user who has just been made to linger: user-manager supervise starts
+    # the manager when it next looks (every two seconds), where with logind
+    # it would be being started already (`systemctl status user-UID.slice`
+    # right after linger-users, upstream's systemd-user-linger).  A moment
+    # for it, as for a timer that has just gone off.
+    if [[ -d /run/user-managers && $(s6-svstat -o up "$m" 2>/dev/null) != true ]] &&
+        name=$(id -nu "${VIRT_UID[$u]}" 2>/dev/null); then
+      for f in "/var/lib/systemd/linger/$name" "/var/lib/elogind/linger/$name"; do
+        [[ -e $f ]] && (( EPOCHSECONDS - $(stat -c %Y "$f" 2>/dev/null || echo 0) <= 5 )) || continue
+        for (( i = 0; i < 30; i++ )); do
+          [[ $(s6-svstat -o up "$m" 2>/dev/null) == true ]] && break
+          sleep 0.1
+        done
+        break
+      done
+    fi
+    if s6-svstat -o up "$m" 2>/dev/null | grep -q true; then
       active_state=active sub_state=running
     else
       active_state=inactive sub_state=dead
@@ -777,6 +808,25 @@ do_restart() {
       do_start "$unit" || rc=1
       continue
     fi
+    if is_rc_starting "${I_ATOM[$unit]}"; then
+      # (dinit) It is still being started, and what requires it waits for
+      # that.  A restart through dinit would cancel those starts: its stop
+      # takes them down as failed (resolvconf's hook restarts nscd at boot,
+      # and nss-user-lookup.target and glance went with it).  With systemd
+      # the restart takes the place of the start; here the start goes on,
+      # and a process being started is started again as soon as it is up
+      # (as for a restart from inside the unit, above).
+      # (no directory yet: its process has not been started)
+      if is_longrun "$unit" && [[ -d $STATE/$unit ]]; then
+        : > "$STATE/$unit/restart-requested"
+        unit_state "$unit"
+        if [[ $active_state == active ]] && sv_status "${I_ATOM[$unit]}"; then
+          kill -HUP "$sv_svpid"
+        fi
+      fi
+      dinit_start "$unit" || rc=1
+      continue
+    fi
     if [[ $INIT == dinit ]] && is_rc_up "${I_ATOM[$unit]}"; then
       # (--force: what requires it is restarted with it, as with systemd)
       dname "${I_ATOM[$unit]}"
@@ -982,18 +1032,21 @@ power() {
     dsd=${dsd%/*}/shutdown
     # -ff: at once, without stopping anything
     (( opt_force >= 2 )) && exec "$dsd" --system "$flag"
-    if (( ! opt_force )); then
-      # The units are stopped from here, and this process is in the control
-      # group of one of them: the login shell's getty, elogind (which runs
-      # `poweroff` for a desktop's power button), a session's display
-      # manager.  The stop of that unit would kill this process with it,
-      # halfway, and nothing would shut the machine down.  So: out of it,
-      # into the root group, deaf to the hangup of the terminal it came from.
-      { echo "$BASHPID" > /sys/fs/cgroup/cgroup.procs; } 2>/dev/null
-      trap '' HUP
-      dinit_stop_ordered
-      trap - HUP
+    if (( ! opt_force )) && [[ ${__SYSTEMCTL_POWER-} != 1 ]]; then
+      # The units are stopped by this program, not by PID 1 (as rc.shutdown
+      # does for s6), and whoever asked is likely to be among them: a shell
+      # of a getty or of sshd, the test driver's backdoor.  When its unit
+      # stops, its control group is emptied, and the shutdown with it (it
+      # never got past the rank of the backdoor).  So it goes on out of the
+      # way, in a session and the root control group of its own; as with
+      # systemd, the request is made and not waited for.
+      (
+        __SYSTEMCTL_POWER=1 setsid "$BASH" -c 'exec "$@"' _ "$0" ${raw[@]+"${raw[@]}"} < /dev/null > /dev/null 2>&1 &
+        echo "$!" 2>/dev/null > /sys/fs/cgroup/cgroup.procs
+      )
+      exit 0
     fi
+    (( opt_force )) || dinit_stop_ordered
     exec "$dsd" "$flag"
   fi
   if (( opt_force >= 2 )); then
