@@ -37,6 +37,7 @@ case $verb in
     rc=0
     targets=("${args[@]}")
     (( ${#targets[@]} )) || targets=("$(id -un)")
+    lingering=()
     for u in "${targets[@]}"; do
       if ! n=$(user_name "$u"); then
         echo "Failed to $verb: user $u is not known" >&2
@@ -45,10 +46,26 @@ case $verb in
       fi
       if [[ $verb == enable-linger ]]; then
         mkdir -p "$LINGER" && : > "$LINGER/$n" || rc=1
+        lingering+=("$(id -u "$n")")
       else
         rm -f "$LINGER/$n"
       fi
     done
+    # With logind the manager of a user who now lingers is started by the
+    # time this returns (`systemctl status user-UID.slice` right after
+    # linger-users, as upstream's systemd-user-linger test does).  Here
+    # `user-manager supervise` starts it when it next looks at the directory
+    # (every two seconds): it is waited for, a while.  (Users below 1000
+    # other than root get none.)
+    if [[ -d /run/user-managers ]]; then
+      for uid in ${lingering[@]+"${lingering[@]}"}; do
+        (( uid == 0 || uid >= 1000 )) || continue
+        for (( i = 0; i < 100; i++ )); do
+          [[ $(s6-svstat -o up "/run/user-managers/user-$uid" 2>/dev/null) == true ]] && break
+          sleep 0.1
+        done
+      done
+    fi
     exit $rc ;;
   show-user|user-status)
     u=${args[0]-$(id -un)}
