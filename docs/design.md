@@ -453,7 +453,10 @@ that was running, by itself. The same on s6 and dinit; the tool is
 - **GRUB.** `grubenv` (`nixith_trial`, `nixith_good`, `nixith_tries`) and a
   piece of `grub.cfg` (`boot.loader.grub.extraConfig`) that counts down and
   saves before booting, picks the trial entry, and when none is left the
-  old one. The tool gives the menu entries `--id`s (a pass over `grub.cfg`).
+  old one. The tool gives the menu entries `--id`s (a pass over `grub.cfg`),
+  and copies the entry to go back to out of the submenu of all configurations
+  to the top level as `nixith-fallback` (an id in a submenu, `submenu>entry`,
+  does not resolve in `default`: GRUB takes the first entry).
   If `grubenv` cannot be written (the value read back is not the one saved)
   the trial is given up rather than repeated for ever. A rollback leaves
   `nixith_tries=0`, which keeps sending the failed first entry to the good

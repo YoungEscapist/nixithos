@@ -232,17 +232,19 @@ grub_env() { echo "$bootDir/grub/grubenv"; }
 grub_id() { local h=${1#/nix/store/}; echo "nixith-${h:0:12}"; }
 
 # Names the entries, so that grub.cfg can pick them by what they start:
-# --id nixith-<start of the store hash of the system>; the menu of all
-# configurations is nixith-all.
+# --id nixith-<start of the store hash of the system>.  GRUB cannot pick an
+# entry inside a submenu by its id (`submenu>entry` does not resolve; the
+# default falls back to the first entry), and the generation to go back to is
+# in the submenu of all configurations; so a copy of its entry, called
+# nixith-fallback, is put after the first entry (which stays number 0).
+# $1: grub.cfg, $2: the id of the entry to copy
 grub_idify() {
-    awk '
+    awk -v good="$2" '
       { l[NR] = $0 }
       END {
         for (i = 1; i <= NR; i++) {
           line = l[i]
-          if (line ~ /^submenu .*All configurations.* \{$/ && line !~ /--id /) {
-            sub(/ \{$/, " --id nixith-all {", line)
-          } else if (line ~ /^[ \t]*menuentry .* \{$/ && line !~ /--id /) {
+          if (line ~ /^[ \t]*menuentry .* \{$/ && line !~ /--id /) {
             for (j = i + 1; j <= NR && l[j] !~ /^[ \t]*\}/; j++) {
               if (match(l[j], /init=\/nix\/store\/[a-z0-9]+/)) {
                 sub(/ \{$/, " --id nixith-" substr(l[j], RSTART + 16, 12) " {", line)
@@ -250,7 +252,30 @@ grub_idify() {
               }
             }
           }
-          print line
+          l[i] = line
+        }
+        # the entry to copy
+        for (i = 1; i <= NR; i++)
+          if (l[i] ~ /^menuentry / && index(l[i], "--id " good " ")) { from = i; break }
+        for (j = from; from && j <= NR; j++) if (l[j] ~ /^\}/) { to = j; break }
+        first = 0
+        for (i = 1; i <= NR; i++) {
+          print l[i]
+          if (!first && l[i] ~ /^menuentry /) first = 1
+          if (first == 1 && l[i] ~ /^\}/) {
+            first = 2
+            if (from && to) {
+              print ""
+              for (j = from; j <= to; j++) {
+                c = l[j]
+                if (j == from) {
+                  sub(/^menuentry "[^"]*"/, "menuentry \"NixithOS - fallback\"", c)
+                  sub(/--id [^ ]+/, "--id nixith-fallback", c)
+                }
+                print c
+              }
+            }
+          }
         }
       }' "$1"
 }
@@ -261,14 +286,14 @@ grub_arm() { # TOPLEVEL GOOD
     [[ -f $cfg ]] || { reason="there is no $cfg"; return 1; }
     [[ -n $grubEditenv ]] || { reason="no grub-editenv"; return 1; }
     tmp=$cfg.nixith.$$
-    grub_idify "$cfg" > "$tmp" && cat "$tmp" > "$cfg"
+    grub_idify "$cfg" "$(grub_id "$good")" > "$tmp" && cat "$tmp" > "$cfg"
     rm -f "$tmp"
-    grep -qF -- "--id $(grub_id "$good") " "$cfg" || { reason="grub.cfg has no entry for the generation that runs"; return 1; }
+    grep -qF -- "--id nixith-fallback " "$cfg" || { reason="grub.cfg has no entry for the generation that runs"; return 1; }
     grep -qF -- "--id $(grub_id "$top") " "$cfg" || { reason="grub.cfg has no entry for the new generation"; return 1; }
     [[ -e $(grub_env) ]] || "$grubEditenv" "$(grub_env)" create
     "$grubEditenv" "$(grub_env)" set \
         "nixith_trial=$(grub_id "$top")" \
-        "nixith_good=nixith-all>$(grub_id "$good")" \
+        "nixith_good=nixith-fallback" \
         "nixith_tries=$tries" || { reason="grubenv cannot be written"; return 1; }
     sync -f "$bootDir" 2> /dev/null || true
     return 0

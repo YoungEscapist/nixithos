@@ -41,9 +41,9 @@
           e = env()
           print(e)
           assert e["nixith_tries"] == "3" and e["nixith_trial"].startswith("nixith-"), e
-          assert e["nixith_good"].startswith("nixith-all>nixith-"), e
+          assert e["nixith_good"] == "nixith-fallback", e
           cfg = machine.succeed("cat /boot/grub/grub.cfg")
-          assert "--id nixith-all" in cfg and ("--id " + e["nixith_trial"]) in cfg, cfg
+          assert "--id nixith-fallback" in cfg and ("--id " + e["nixith_trial"]) in cfg, cfg
 
           assert reboot() == "rolled-back"
           assert booted() == gen1
