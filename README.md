@@ -449,9 +449,9 @@ $ cat /run/uncaught-logs/current    # the boot log and everything without a logg
 
 ## Not there yet
 
-See [docs/status.md](docs/status.md). In short: system call filters
-(`SystemCallFilter=`, `RestrictAddressFamilies=`; the rest of the sandbox
-works, and what is not applied is listed in the database's `report.txt`),
+See [docs/status.md](docs/status.md). In short: `IPAddressDeny=`, `DeviceAllow=`, `PrivateUsers=` (the rest of the sandbox
+and the system call filters work; the build warns about what is asked for and
+not applied, and the database's `report.txt` lists it),
 `.automount`, template instances created on the fly (`systemctl start
 foo@new` when no dependency and no drop-in names it), containers.
 

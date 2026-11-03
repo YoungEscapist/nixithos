@@ -186,9 +186,31 @@ unshare --mount --propagation private [--net] [--uts] [--ipc] --
 после `setpriv`: на этот миг у процесса есть CAP_SYS_CHROOT в ambient, потом он
 снимается. Так работает, например, `tor.service`.
 
-Чего нет: `SystemCallFilter=`, `RestrictAddressFamilies=`,
-`MemoryDenyWriteExecute=`, `RestrictNamespaces=` и прочего на seccomp, а также
-`PrivateUsers=`, `ProtectProc=`, `RootImage=`; они остаются в `report.txt`.
+`ProtectProc=` и `ProcSubset=` монтируют свой `/proc` (`hidepid=`,
+`subset=pid`) в том же пространстве имён.
+
+Seccomp — это `unit-seccomp` (libseccomp), последнее звено префикса команды
+после `setpriv` и `unit-chroot` (юниту с `RootDirectory=` фильтры ставит сам
+`unit-chroot`, `-S`: в таком корне нет хранилища): `SystemCallFilter=` с
+группами systemd (`@system-service`, `~@privileged`, `:ERRNO`; таблица
+генерируется из `seccomp-util.c` systemd скриптом `gen-syscall-groups.py`),
+`SystemCallErrorNumber=`, `SystemCallArchitectures=`,
+`RestrictAddressFamilies=`, `RestrictNamespaces=`, `RestrictRealtime=`,
+`RestrictSUIDSGID=`, `MemoryDenyWriteExecute=` (`PR_SET_MDWE`, на старом ядре
+правила) и `LockPersonality=`. Как у systemd, процесс получает `no_new_privs`,
+если у него нет CAP_SYS_ADMIN; команда с `+` не получает ничего из этого.
+
+Лимиты ресурсов (`MemoryMax=`, `MemoryHigh=`, `MemorySwapMax=`, `CPUQuota=`,
+`CPUWeight=`, `TasksMax=`, `IOWeight=`…) пишутся в cgroup юнита (контроллеры
+`cpu memory pids io cpuset` включены в `subtree_control` у
+`/sys/fs/cgroup/units`); у пользовательского сервиса своей группы нет, его
+лимиты не применяются.
+
+Чего нет: `PrivateUsers=`, `PrivatePIDs=`, `RemoveIPC=`,
+`IPAddressAllow/Deny=`, `DevicePolicy=`, `DeviceAllow=`, `SocketBind*=`,
+`RootImage=`; они остаются в `report.txt`, а `modules/system/hardening.nix`
+превращает заданные в `systemd.services` / `systemd.user.services` в одно
+предупреждение сборки (`nixithos.hardening.warnUnapplied`, `.ignore`).
 Не существующий путь не отказ, а предупреждение (systemd отказывает).
 
 ### Порядок, требования и отказы

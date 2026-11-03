@@ -195,11 +195,33 @@ The `chroot` itself is done by `unit-chroot` after `setpriv`: for that moment
 the process has CAP_SYS_CHROOT in its ambient set, then it is dropped. This
 is how `tor.service`, for example, works.
 
-What is missing: `SystemCallFilter=`, `RestrictAddressFamilies=`,
-`MemoryDenyWriteExecute=`, `RestrictNamespaces=` and the rest of seccomp, as
-well as `PrivateUsers=`, `ProtectProc=`, `RootImage=`; they stay in
-`report.txt`. A path that does not exist is a warning, not a failure
-(systemd fails).
+`ProtectProc=` and `ProcSubset=` mount a `/proc` of their own (`hidepid=`,
+`subset=pid`) in the same namespace.
+
+Seccomp is `unit-seccomp` (libseccomp), the last link of the command prefix,
+after `setpriv` and `unit-chroot` (a unit with a `RootDirectory=` has the
+filters loaded by `unit-chroot` itself, `-S`: the store is not in that root):
+`SystemCallFilter=` with the groups of systemd (`@system-service`,
+`~@privileged`, `:ERRNO`; the table is generated from systemd's
+`seccomp-util.c` by `gen-syscall-groups.py`), `SystemCallErrorNumber=`,
+`SystemCallArchitectures=`, `RestrictAddressFamilies=`,
+`RestrictNamespaces=`, `RestrictRealtime=`, `RestrictSUIDSGID=`,
+`MemoryDenyWriteExecute=` (`PR_SET_MDWE`, or rules on an older kernel) and
+`LockPersonality=`. As with systemd, the process gets `no_new_privs` unless it
+has CAP_SYS_ADMIN, and a command with `+` has none of it.
+
+The resource limits (`MemoryMax=`, `MemoryHigh=`, `MemorySwapMax=`,
+`CPUQuota=`, `CPUWeight=`, `TasksMax=`, `IOWeight=`…) are written into the
+control group of the unit (`cpu memory pids io cpuset` are enabled in the
+`subtree_control` of `/sys/fs/cgroup/units`); a user's service has no group
+of its own, its limits are not applied.
+
+What is missing: `PrivateUsers=`, `PrivatePIDs=`, `RemoveIPC=`,
+`IPAddressAllow/Deny=`, `DevicePolicy=`, `DeviceAllow=`, `SocketBind*=`,
+`RootImage=`; they stay in `report.txt`, and `modules/system/hardening.nix`
+turns the ones set in `systemd.services` / `systemd.user.services` into one
+warning of the build (`nixithos.hardening.warnUnapplied`, `.ignore`). A path
+that does not exist is a warning, not a failure (systemd fails).
 
 ### Ordering, requirements and failures
 
