@@ -272,17 +272,24 @@ resolve() {
 
 rc_up=
 rc_busy=0
+# (dinit) what it is starting, by dinit name
+rc_starting=
 load_rc() {
   if [[ $INIT == dinit ]]; then
     # what dinit has started, by dinit name ("[{+}     ] name …": the third
-    # character is + when started, s when its start was skipped)
+    # character is + when started, s when its start was skipped; the fifth
+    # and sixth are << while it is being started)
     local line name
     rc_up=" "
+    rc_starting=" "
     rc_busy=0
     while IFS= read -r line; do
-      [[ ${line:2:1} == [+s] ]] || continue
       name=${line:11}
-      rc_up+="${name%% *} "
+      if [[ ${line:2:1} == [+s] ]]; then
+        rc_up+="${name%% *} "
+      elif [[ ${line:4:2} == "<<" ]]; then
+        rc_starting+="${name%% *} "
+      fi
     done < <("${DINITCTL[@]}" list 2>/dev/null)
     return 0
   fi
@@ -303,6 +310,13 @@ is_rc_up() {
   else
     [[ $rc_up == *" $1 "* ]]
   fi
+}
+
+# (dinit) is it being started?
+is_rc_starting() {
+  [[ $INIT == dinit ]] || return 1
+  dname "$1"
+  [[ $rc_starting == *" $DN "* ]]
 }
 
 # DN: the name dinit knows ATOM $1 by (unitc's dname: `@`, `\`, `:` are not
@@ -775,6 +789,25 @@ do_restart() {
     fi
     if [[ ${I_KIND[$unit]} == target ]]; then
       do_start "$unit" || rc=1
+      continue
+    fi
+    if is_rc_starting "${I_ATOM[$unit]}"; then
+      # (dinit) It is still being started, and what requires it waits for
+      # that.  A restart through dinit would cancel those starts: its stop
+      # takes them down as failed (resolvconf's hook restarts nscd at boot,
+      # and nss-user-lookup.target and glance went with it).  With systemd
+      # the restart takes the place of the start; here the start goes on,
+      # and a process being started is started again as soon as it is up
+      # (as for a restart from inside the unit, above).
+      # (no directory yet: its process has not been started)
+      if is_longrun "$unit" && [[ -d $STATE/$unit ]]; then
+        : > "$STATE/$unit/restart-requested"
+        unit_state "$unit"
+        if [[ $active_state == active ]] && sv_status "${I_ATOM[$unit]}"; then
+          kill -HUP "$sv_svpid"
+        fi
+      fi
+      dinit_start "$unit" || rc=1
       continue
     fi
     if [[ $INIT == dinit ]] && is_rc_up "${I_ATOM[$unit]}"; then
