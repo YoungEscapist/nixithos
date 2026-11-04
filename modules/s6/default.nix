@@ -415,6 +415,12 @@ let
           s6-rc -v${toString cfg.rc.verbosity} -u change "''${late[@]}" 2>&1 | console_status
         fi
       fi
+
+      # 4. The boot is over.  A generation that was on trial (boot
+      #    assessment, nixithos.bootAssessment) is good now.
+      if [ -r /etc/units/boot-hook ] && read -r hook < /etc/units/boot-hook && [ -x "$hook" ]; then
+        timeout 120 "$hook" good || true
+      fi
       exit 0
     '')
     (script "runlevel" ''

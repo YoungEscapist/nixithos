@@ -2163,6 +2163,11 @@ cmd_target_up() {
 cmd_booted() {
   rm -f "$RT_STATE/.booting"
   [[ $scope == user ]] && : > "$RT_STATE/.up"
+  # a generation that was on trial (nixithos.bootAssessment) is good now
+  local hook
+  if [[ $scope == system && -r /etc/units/boot-hook ]] && read -r hook < /etc/units/boot-hook && [[ -x $hook ]]; then
+    timeout 120 "$hook" good || true
+  fi
   return 0
 }
 

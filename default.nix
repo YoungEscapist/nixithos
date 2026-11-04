@@ -196,6 +196,10 @@ in
     timesync = ./tests/timesync.nix;
     # an installed system: GRUB (BIOS) and Limine (UEFI) start s6 and reboot
     bootloader = ./tests/bootloader.nix;
+    # a generation that does not boot is gone from the boot loader's default
+    rollback-systemd-boot = ./tests/rollback-systemd-boot.nix;
+    rollback-grub = ./tests/rollback-grub.nix;
+    rollback-limine = ./tests/rollback-limine.nix;
   }
   // {
     # the same boot and units, with the nodes built from nixpkgs' unmodified
@@ -220,6 +224,9 @@ in
     sandbox = ./tests/sandbox.nix;
     hardening = ./tests/hardening.nix;
     timesync = ./tests/timesync.nix;
+    rollback-systemd-boot = ./tests/rollback-systemd-boot.nix;
+    rollback-grub = ./tests/rollback-grub.nix;
+    rollback-limine = ./tests/rollback-limine.nix;
   };
 
   # A scratch test for poking at a VM; not part of the suite.
