@@ -38,8 +38,9 @@
         else:
             machine.succeed("grep -q s6-svscan /proc/1/cmdline")
             # the boot transaction is over and the steady database is live
-            machine.succeed("readlink /run/s6-rc/compiled | grep -q '/compiled$'")
-        machine.succeed("test ! -e /run/units/.booting")
+            # (multi-user.target is up before s6-rc-update has swapped it in)
+            machine.wait_until_succeeds("readlink /run/s6-rc/compiled | grep -q '/compiled$'", timeout=60)
+        machine.wait_until_succeeds("test ! -e /run/units/.booting", timeout=60)
 
     with subtest("nothing failed"):
         print(machine.succeed("systemctl list-units --all --no-legend"))
