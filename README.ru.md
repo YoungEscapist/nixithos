@@ -105,6 +105,27 @@ $ dinitctl list | head -3
 [{+}     ] dbus (pid: 612)
 ```
 
+### runit, третий
+
+`nixithos.init = "runit";` — PID 1 становится runit, а над каждым процессом
+системы стоит `runsv` под `runsvdir`. runit не знает, что нужно сервису, —
+знает `unit-rc` (`rcctl list`, `rcctl start …`, команды как у `dinitctl`): он
+читает те же описания сервисов, что и dinit, запускает сервис вместе с тем,
+что тот требует и чего ждёт, исполняет oneshot-ы, а процессы отдаёт `runsv`
+под `unit-supervise`, как у dinit. Остановка — третья стадия runit после того,
+как `systemctl poweroff` по порядку остановил юниты. Менеджеры пользователей
+остаются деревьями s6. Тесты идут и на нём: `nix-build -A runit.boot` и так
+далее.
+
+```console
+$ cat /proc/1/comm
+runit
+$ rcctl list | head -3
+[{+}     ] boot
+[[+]     ] default
+[[+]     ] dbus
+```
+
 ## Что вместо чего
 
 | было | стало |

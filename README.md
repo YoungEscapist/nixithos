@@ -105,6 +105,27 @@ $ dinitctl list | head -3
 [{+}     ] dbus (pid: 612)
 ```
 
+### runit, the third
+
+`nixithos.init = "runit";` makes runit PID 1, with `runsvdir` over a `runsv`
+for every process of the system. runit knows nothing of what a service needs,
+so `unit-rc` does (`rcctl list`, `rcctl start …`, the commands of `dinitctl`):
+it reads the same service descriptions as dinit does, starts a service with
+what it requires and waits for, runs the oneshots, and has `runsv` start the
+processes, under `unit-supervise` as with dinit. Shutdown is runit's stage 3
+after `systemctl poweroff` has stopped the units in order. The managers of
+users stay s6 trees. The unit tests run on it as `nix-build -A runit.boot`
+and so on.
+
+```console
+$ cat /proc/1/comm
+runit
+$ rcctl list | head -3
+[{+}     ] boot
+[[+]     ] default
+[[+]     ] dbus
+```
+
 ## What replaces what
 
 | was | is |
