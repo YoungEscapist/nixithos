@@ -126,6 +126,32 @@ $ rcctl list | head -3
 [[+]     ] dbus
 ```
 
+### OpenRC, the fourth
+
+`nixithos.init = "openrc";` makes OpenRC PID 1 (`openrc-init`) and gives it the
+services as scripts for `openrc-run`, written by `unitc --init openrc`: what
+dinit's descriptions call depends-on, waits-for and after is `need`, `want`
+and `after` in `depend()`, and OpenRC itself works out what starts after what
+(in parallel; the default runlevel has one service, `boot`, which wants
+everything). The processes of a service run under `unit-supervise`, started by
+`start-stop-daemon` and waited for by `unit-svwait`; the oneshots are
+commands. `openrcctl list`, `openrcctl start …` are the commands of
+`dinitctl` over `rc-service`, which systemctl and `switch-to-configuration`
+use; a switch moves the link `/run/units/.db` and has OpenRC read the
+dependencies again (`rc-update -u`). Shutdown is OpenRC's: `systemctl poweroff`
+tells `openrc-init`, which stops the services in the reverse order. The
+managers of users stay s6 trees. The unit tests run on it as
+`nix-build -A openrc.boot` and so on.
+
+```console
+$ cat /proc/1/comm
+openrc-init
+$ openrcctl list | head -3
+[{+}     ] boot
+[{+}     ] default
+[{+}     ] dbus
+```
+
 ## What replaces what
 
 | was | is |

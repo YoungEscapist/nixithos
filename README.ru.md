@@ -126,6 +126,31 @@ $ rcctl list | head -3
 [[+]     ] dbus
 ```
 
+### OpenRC, четвёртый
+
+`nixithos.init = "openrc";` — PID 1 становится OpenRC (`openrc-init`), а службы
+ему отдаются скриптами для `openrc-run`, которые пишет `unitc --init openrc`:
+то, что в описаниях dinit зовётся depends-on, waits-for и after, здесь `need`,
+`want` и `after` в `depend()`, а что за чем стартует, OpenRC считает сам
+(параллельно; в уровне default одна служба, `boot`, которая хочет всё).
+Процессы службы идут под `unit-supervise`, их запускает `start-stop-daemon`, а
+готовности ждёт `unit-svwait`; oneshot-ы — просто команды. `openrcctl list`,
+`openrcctl start …` — команды `dinitctl` поверх `rc-service`, ими пользуются
+systemctl и `switch-to-configuration`; переключение переставляет ссылку
+`/run/units/.db` и просит OpenRC перечитать зависимости (`rc-update -u`).
+Остановка — дело OpenRC: `systemctl poweroff` говорит `openrc-init`, и тот
+останавливает службы в обратном порядке. Менеджеры пользователей остаются
+деревьями s6. Тесты идут и на нём: `nix-build -A openrc.boot` и так далее.
+
+```console
+$ cat /proc/1/comm
+openrc-init
+$ openrcctl list | head -3
+[{+}     ] boot
+[{+}     ] default
+[{+}     ] dbus
+```
+
 ## Что вместо чего
 
 | было | стало |
