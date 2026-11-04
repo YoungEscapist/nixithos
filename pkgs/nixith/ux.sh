@@ -99,9 +99,10 @@ live_db() {
     if [ -n "${NIXITH_DB:-}" ]; then
         # (a database to look in, not the live one: for tests)
         WHY_DB=$NIXITH_DB
-        WHY_INIT=$(if [ -L /run/units/.db ]; then echo dinit; else echo s6; fi)
+        WHY_INIT=$(if [ -d /run/units/.db/runit ]; then echo runit; elif [ -L /run/units/.db ]; then echo dinit; else echo s6; fi)
     elif [ -L /run/units/.db ] && [ ! -e /run/s6-rc/compiled ]; then
         WHY_INIT=dinit
+        [ -d /run/units/.db/runit ] && WHY_INIT=runit
         WHY_DB=$(readlink -f /run/units/.db)
     elif [ -e /run/s6-rc/compiled ]; then
         WHY_INIT=s6
@@ -198,7 +199,10 @@ why_unit() {
     local a
     for a in $atoms; do
         case $a in *-log | *-hooks) continue ;; esac
-        if [ "$WHY_INIT" = dinit ]; then
+        if [ "$WHY_INIT" = runit ]; then
+            dname "$a"
+            "$rcctl" -p /run/rcctl status "$DN" 2>&1 | sed "s|^|        |" || true
+        elif [ "$WHY_INIT" = dinit ]; then
             dname "$a"
             "$dinitctl" -p /run/dinitctl status "$DN" 2>&1 | sed "s|^|        |" || true
         elif [ "$WHY_INIT" = s6 ]; then
@@ -211,7 +215,7 @@ why_unit() {
             fi
         fi
     done
-    if [ "$WHY_INIT" = dinit ] && [ -r "/run/units/.sv/$atom" ]; then
+    if [ "$WHY_INIT" != s6 ] && [ "$WHY_INIT" != none ] && [ -r "/run/units/.sv/$atom" ]; then
         echo "        supervisor: $(cat "/run/units/.sv/$atom")  (up ready pid want supervisor-pid phase)"
     fi
 

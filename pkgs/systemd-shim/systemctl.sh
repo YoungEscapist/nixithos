@@ -1,6 +1,6 @@
 #!@shell@
 # systemctl - the part of systemctl that scripts and habits rely on, for a
-# system whose services are run by s6-rc or by dinit.
+# system whose services are run by s6-rc, by dinit or by runit.
 #
 # Units are looked up in the index of the live service database (written by
 # unitc).  Starting a unit goes through s6-rc, so that what it requires comes
@@ -17,6 +17,11 @@
 # in their manager's units/.sv) says whether they run; a unit whose process
 # has ended for good stays "started" to dinit, and its supervisor starts it
 # again when told (SIGUSR1).
+#
+# Under runit (nixithos.init = "runit") it is the same, with unit-rc in the
+# place of dinit: it answers to the same commands (unit-rc -p SOCKET list,
+# start, stop --force, …) and to the same status files.  What differs is the
+# end: runit-init 0 or 6, once the units are stopped.
 
 PATH=@path@:$PATH
 RUNTIME=@runtime@
@@ -33,6 +38,8 @@ TIMERS=/var/lib/units/timers
 # --user, the user's manager: an s6 tree, or dinit --user)
 INIT=s6
 DINITCTL=(dinitctl -p /run/dinitctl)
+# (dinit's way of things, with unit-rc and runit for it)
+RUNIT=0
 # (--user) whether the user has a manager running
 USER_MANAGER=0
 
@@ -42,6 +49,11 @@ rc() { s6-rc -l "$LIVE" "$@"; }
 
 die() { echo "$me: $*" >&2; exit 1; }
 warn() { echo "$me: $*" >&2; }
+
+# the service manager by name
+init_name() {
+  if (( RUNIT )); then echo runit; elif [[ $INIT == dinit ]]; then echo dinit; else echo s6-rc; fi
+}
 
 # Called once the options are known: which manager, and which database.
 discover() {
@@ -89,6 +101,10 @@ discover() {
     # dinit: its init points /run/units/.db at the database in use
     INIT=dinit
     DB=$(readlink -f "$STATE/.db")
+    if [[ -d $STATE/.db/runit ]]; then
+      RUNIT=1
+      DINITCTL=(unit-rc -p /run/rcctl)
+    fi
     return
   fi
   live=$(readlink -f "$LIVE/compiled" 2>/dev/null) || live=
@@ -898,7 +914,7 @@ show_status() {
   echo "     Loaded: loaded ($DB/units/$u; $([[ ${I_BOOT[$u]} == 1 ]] && echo enabled || echo static))"
   echo "     Active: $active_state ($sub_state)${since:+ since $since}"
   [[ -n $pid ]] && echo "   Main PID: $pid ($(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-60))"
-  echo "     $([[ $INIT == dinit ]] && echo dinit || echo s6-rc): ${I_ATOMS[$u]}"
+  echo "     $(init_name): ${I_ATOMS[$u]}"
   if [[ -r /sys/fs/cgroup/units/${I_ATOM[$u]}/cgroup.procs ]]; then
     local procs
     procs=$(tr '\n' ' ' < "/sys/fs/cgroup/units/${I_ATOM[$u]}/cgroup.procs")
@@ -1051,11 +1067,20 @@ power() {
   case $1 in halt) flag=-h ;; poweroff) flag=-p ;; reboot) flag=-r ;; esac
   if [[ $INIT == dinit ]]; then
     local dsd
-    dsd=$(type -P dinitctl) || die "dinitctl is not there"
-    # (dinit's shutdown, next to it: not the one of the system's profile)
-    dsd=${dsd%/*}/shutdown
+    if (( RUNIT )); then
+      # runit-init 0 powers off (or halts), 6 reboots: it makes runit end
+      # stage 2 and start stage 3
+      case $1 in reboot) dsd=6 ;; *) dsd=0 ;; esac
+    else
+      dsd=$(type -P dinitctl) || die "dinitctl is not there"
+      # (dinit's shutdown, next to it: not the one of the system's profile)
+      dsd=${dsd%/*}/shutdown
+    fi
     # -ff: at once, without stopping anything
-    (( opt_force >= 2 )) && exec "$dsd" --system "$flag"
+    if (( opt_force >= 2 )); then
+      if (( RUNIT )); then exec runit-init "$dsd"; fi
+      exec "$dsd" --system "$flag"
+    fi
     if (( ! opt_force )) && [[ ${__SYSTEMCTL_POWER-} != 1 ]]; then
       # The units are stopped by this program, not by PID 1 (as rc.shutdown
       # does for s6), and whoever asked is likely to be among them: a shell
@@ -1071,6 +1096,7 @@ power() {
       exit 0
     fi
     (( opt_force )) || dinit_stop_ordered
+    if (( RUNIT )); then exec runit-init "$dsd"; fi
     exec "$dsd" "$flag"
   fi
   if (( opt_force >= 2 )); then
@@ -1114,7 +1140,7 @@ case $verb in
     cat <<'EOF'
 systemctl [OPTIONS…] COMMAND [UNIT…]
 
-Front-end to s6-rc (or dinit) for systemd-style units.
+Front-end to s6-rc (or dinit, or runit) for systemd-style units.
 
   start, stop, restart, try-restart, reload, reload-or-restart, kill
   status, show, cat, is-active, is-failed, is-enabled, is-system-running
@@ -1199,7 +1225,7 @@ EOF
       echo "● $(< /proc/sys/kernel/hostname)"
       echo "    State: $( { (( rc_busy )) || [[ -e $STATE/.booting ]]; } && echo starting || { (( failed )) && echo degraded || echo running; })"
       echo "    Units: ${#I_KIND[@]} loaded, $failed failed"
-      if [[ $INIT == dinit ]]; then echo "     Init: dinit ($DB)"; else echo "     Init: s6-linux-init / s6-rc ($DB)"; fi
+      if [[ $INIT == dinit ]]; then echo "     Init: $(init_name) ($DB)"; else echo "     Init: s6-linux-init / s6-rc ($DB)"; fi
       exit 0
     fi
     rc=0
@@ -1249,7 +1275,7 @@ EOF
   show)
     load_index; load_rc
     if (( ${#units[@]} == 0 )); then
-      echo "Version=$([[ $INIT == dinit ]] && echo dinit || echo s6-rc)"
+      echo "Version=$(init_name)"
       echo "SystemState=$( (( rc_busy )) && echo starting || echo running)"
       exit 0
     fi
@@ -1351,6 +1377,7 @@ EOF
   get-default) load_index; echo "${ALIAS[default.target]-multi-user.target}" ;;
   poweroff|halt|reboot) power "$verb" ;;
   kexec)
+    if (( RUNIT )); then exec runit-init 6; fi
     if [[ $INIT == dinit ]]; then d=$(type -P dinitctl) && exec "${d%/*}/shutdown" -k; fi
     exec s6-linux-init-hpr -r ;;
   suspend|hibernate|hybrid-sleep|suspend-then-hibernate)

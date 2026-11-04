@@ -12,8 +12,14 @@
 let
   useHostResolvConf = config.networking.resolvconf.enable && config.networking.useHostResolvConf;
   isS6 = config.nixithos.init == "s6";
-  # what stage 2 executes in the end: bin/init of either
-  initBase = if isS6 then config.system.build.s6InitBase else config.system.build.dinitInit;
+  # what stage 2 executes in the end: bin/init of any of them
+  initBase =
+    {
+      s6 = config.system.build.s6InitBase;
+      dinit = config.system.build.dinitInit;
+      runit = config.system.build.runitInit;
+    }
+    .${config.nixithos.init};
 in
 
 {
@@ -29,7 +35,7 @@ in
         inherit useHostResolvConf;
         inherit (config.system.build) earlyMountScript;
         inherit initBase;
-        initName = if isS6 then "s6-linux-init" else "dinit";
+        initName = if isS6 then "s6-linux-init" else config.nixithos.init;
         path = lib.makeBinPath (
           [
             pkgs.coreutils

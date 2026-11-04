@@ -1,4 +1,4 @@
-# switch-to-configuration for s6-rc and dinit; see the script.
+# switch-to-configuration for s6-rc, dinit and runit; see the script.
 {
   lib,
   replaceVarsWith,
@@ -10,6 +10,7 @@
   s6,
   s6-rc,
   dinit,
+  runit,
   nixithos,
 }:
 
@@ -29,6 +30,8 @@ replaceVarsWith {
       s6
       s6-rc
       dinit
+      runit
+      nixithos.unitTools
     ];
     runtime = "${nixithos.unitRuntime}/bin/unit-runtime";
     userManager = "${nixithos.userManager}/bin/user-manager";
@@ -39,7 +42,7 @@ replaceVarsWith {
   '';
 
   meta = {
-    description = "Activates a system configuration on an s6-rc or dinit based NixOS";
+    description = "Activates a system configuration on an s6-rc, dinit or runit based NixOS";
     mainProgram = "switch-to-configuration";
     platforms = lib.platforms.linux;
   };

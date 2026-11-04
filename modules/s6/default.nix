@@ -11,7 +11,9 @@
 # descriptions instead, and what is here about s6-linux-init is left out; the
 # rest (the runtime, the options of logging and native services, the fd
 # holder) is shared.  The services of users follow: their managers are
-# dinit --user then, on descriptions from the same units.
+# dinit --user then, on descriptions from the same units.  With "runit"
+# (../runit) the descriptions are the same, in runit/, and unit-rc reads
+# them; the managers of users stay s6 trees there.
 {
   config,
   lib,
@@ -23,6 +25,8 @@ let
   inherit (lib) mkOption types;
   cfg = config.s6;
   isS6 = config.nixithos.init == "s6";
+  # (the managers of users: dinit --user, or else an s6 tree)
+  userDinit = config.nixithos.init == "dinit";
 
   # (dinit) where the database of the running configuration is: the services
   # are read from it and refer to their unit data through it, so that their
@@ -208,10 +212,10 @@ let
       ''
     else
       ''
-        # dinit's descriptions (dinit/), with every path in them through the
-        # database of the running configuration
+        # dinit's descriptions (dinit/, or runit/ for unit-rc), with every
+        # path in them through the database of the running configuration
         unitc \
-          --init dinit \
+          --init ${config.nixithos.init} \
           --units "$units" \
           --out "$out" \
           --final-out ${live} \
@@ -242,7 +246,7 @@ let
   userLive = "\${UNIT_USER_STATE}/db";
 
   userServices =
-    if isS6 then
+    if !userDinit then
       ''
         unitc \
           --scope user \
@@ -279,7 +283,7 @@ let
       '';
 
   database =
-    pkgs.runCommand (if isS6 then "s6-rc-database" else "dinit-database")
+    pkgs.runCommand (if isS6 then "s6-rc-database" else "${config.nixithos.init}-database")
       {
         nativeBuildInputs = [
           pkgs.buildPackages.nixithos.unitc
@@ -294,7 +298,7 @@ let
         ${systemServices}
         # The services of users: the same, from systemd.user.*, for the
         # service manager each user gets (../../pkgs/user-manager): an s6
-        # supervision tree, or dinit --user.
+        # supervision tree (also under runit), or dinit --user.
         mkdir "$out/user"
         ${userServices}
         ln -s "$userUnits" "$out/user/units"

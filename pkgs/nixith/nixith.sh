@@ -11,6 +11,7 @@ services_tui=@services@/bin/nixith-services
 s6_svstat=@s6svstat@
 s6_rc=@s6rc@
 dinitctl=@dinitctl@
+rcctl=@rcctl@
 profiles=/nix/var/nix/profiles
 
 die() {

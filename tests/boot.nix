@@ -1,4 +1,4 @@
-# The system boots on s6 (or dinit, as dinit.boot), reaches its default
+# The system boots on s6 (or dinit, as dinit.boot, or runit, as runit.boot), reaches its default
 # target with nothing failed, and shuts down cleanly.
 {
   name = "boot";
@@ -26,7 +26,15 @@
 
     with subtest(f"init is {init}"):
         machine.fail("pgrep -x systemd")
-        if init == "dinit":
+        if init == "runit":
+            machine.succeed("grep -qx runit /proc/1/comm")
+            # runsvdir keeps a runsv for each process, and unit-rc the graph
+            machine.succeed("pgrep -x runsvdir && pgrep -x runsv && pgrep -f 'unit-rc daemon'")
+            machine.succeed('test "$(readlink -f /run/units/.db)" = "$(readlink -f /run/current-system/s6-db)"')
+            machine.succeed("rcctl list | grep -q '^\\[\\[+\\]' ")
+            print(machine.succeed("rcctl list"))
+            machine.succeed("readlink -f $(command -v poweroff) | grep -q systemctl")
+        elif init == "dinit":
             machine.succeed("grep -qx dinit /proc/1/comm")
             # the services are read from the database of this configuration
             machine.succeed('test "$(readlink -f /run/units/.db)" = "$(readlink -f /run/current-system/s6-db)"')

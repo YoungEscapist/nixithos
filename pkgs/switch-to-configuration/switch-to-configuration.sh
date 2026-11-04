@@ -73,14 +73,22 @@ fi
 
 new_db=$(readlink -f "$toplevel/s6-db")
 
-# the init system that runs, and the one of the new configuration
-running_init=s6
-[[ -L $STATE/.db && ! -e /run/s6-rc/compiled ]] && running_init=dinit
-new_init=s6
-[[ -d $new_db/dinit ]] && new_init=dinit
+# the init system that runs, and the one of the new configuration.  runit
+# goes as dinit does: its services are described the same way (in runit/ in
+# place of dinit/), and unit-rc answers to what dinitctl is asked here;
+# *_kind tells them apart.
+running_init=s6 running_kind=s6
+if [[ -L $STATE/.db && ! -e /run/s6-rc/compiled ]]; then
+  running_init=dinit running_kind=dinit
+  [[ -d $STATE/.db/runit ]] && running_kind=runit
+fi
+new_init=s6 new_kind=s6
+[[ -d $new_db/dinit ]] && new_init=dinit new_kind=dinit
+[[ -d $new_db/runit ]] && new_init=dinit new_kind=runit
 # (a command to dinit that does not come back - a service that never gets to
 # where it is going - is a warning, not a switch that hangs for good)
 DINITCTL=(timeout 300 dinitctl -p /run/dinitctl)
+[[ $running_kind == runit ]] && DINITCTL=(timeout 300 unit-rc -p /run/rcctl)
 
 if [[ $running_init == dinit ]]; then
   live=$(readlink -f "$STATE/.db" 2>/dev/null) || live=
@@ -99,11 +107,11 @@ if [[ -z $live || ! -r $old_db/switch.tsv ]]; then
   exec "$toplevel/activate" "$toplevel"
 fi
 
-if [[ $running_init != "$new_init" ]]; then
+if [[ $running_kind != "$new_kind" ]]; then
   # What runs stays as it is: the new init system and its services take over
   # at the next boot.  The rest of the configuration is laid down now.
-  echo "the new configuration is for $new_init, and $running_init runs this machine: its services change over at the next boot" >&2
-  if [[ $action == plan ]]; then printf '#note\tthe new configuration is for %s and %s runs this machine: its services change over at the next boot\n' "$new_init" "$running_init"; exit 0; fi
+  echo "the new configuration is for $new_kind, and $running_kind runs this machine: its services change over at the next boot" >&2
+  if [[ $action == plan ]]; then printf '#note\tthe new configuration is for %s and %s runs this machine: its services change over at the next boot\n' "$new_kind" "$running_kind"; exit 0; fi
   if [[ $action == dry-activate ]]; then exec "$toplevel/dry-activate" "$toplevel"; fi
   echo "activating the configuration..."
   exec "$toplevel/activate" "$toplevel"
@@ -379,6 +387,9 @@ if [[ $running_init == dinit ]]; then
   if [[ $new_db != "$old_db" ]]; then
     ln -sfn "$new_db" "$STATE/.db"
     ln -sfn "$new_db" /nix/var/nix/gcroots/units-live 2>/dev/null
+    # (unit-rc: a runsv for each process of the new database, none for those
+    # that are gone)
+    [[ $running_kind == runit ]] && "${DINITCTL[@]}" --quiet rescan
     # What dinit has loaded and is described differently now is read again;
     # what is gone is unloaded once nothing refers to it any more.
     gone=()
@@ -386,8 +397,8 @@ if [[ $running_init == dinit ]]; then
       line=${line:11}
       name=${line%% *}
       [[ -n $name ]] || continue
-      if [[ ! -e $new_db/dinit/$name ]]; then gone+=("$name"); continue; fi
-      cmp -s "$old_db/dinit/$name" "$new_db/dinit/$name" && continue
+      if [[ ! -e $new_db/$running_kind/$name ]]; then gone+=("$name"); continue; fi
+      cmp -s "$old_db/$running_kind/$name" "$new_db/$running_kind/$name" && continue
       if ! "${DINITCTL[@]}" --quiet reload "$name" 2>/dev/null; then
         # (a running service that cannot take the change - another kind of
         # service, a requirement that is not up - is stopped first; the

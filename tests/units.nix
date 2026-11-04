@@ -486,7 +486,10 @@
         machine.fail("systemctl is-active t-hooks")
         machine.succeed("systemctl start t-hooks && systemctl is-active t-hooks")
         # the native way stops it too, hooks included
-        if init == "dinit":
+        if init == "runit":
+            machine.succeed("rm /run/t-hooks.stop && rcctl stop --force t-hooks && test -e /run/t-hooks.stop")
+            machine.succeed("rcctl start t-hooks && systemctl is-active t-hooks")
+        elif init == "dinit":
             machine.succeed("rm /run/t-hooks.stop && dinitctl stop --force t-hooks && test -e /run/t-hooks.stop")
             machine.succeed("dinitctl start t-hooks && systemctl is-active t-hooks")
         else:

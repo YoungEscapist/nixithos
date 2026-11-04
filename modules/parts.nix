@@ -106,6 +106,7 @@ let
     ./init.nix
     ./s6
     ./dinit
+    ./runit
     ./compat/units.nix
     ./compat/base-units.nix
     ./compat/package-units.nix

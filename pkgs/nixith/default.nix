@@ -13,6 +13,8 @@
   s6,
   s6-rc,
   dinit,
+  # (unit-rc, which runit's services are asked through)
+  nixithos,
   # the console list of units (nixith services)
   nixith-services,
   # the tree and the nixpkgs under it, which systems are evaluated with
@@ -51,6 +53,7 @@ replaceVarsWith {
     s6svstat = "${s6}/bin/s6-svstat";
     s6rc = "${s6-rc}/bin/s6-rc";
     dinitctl = "${dinit}/bin/dinitctl";
+    rcctl = "${nixithos.unitTools}/bin/unit-rc";
     ux = "${./ux.sh}";
   };
 

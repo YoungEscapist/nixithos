@@ -77,6 +77,9 @@ let
   # ... and the default mode on the other init system (nixithos.init)
   runDinit = runnerFor "replace" { init = "dinit"; };
 
+  # ... and on the third (runit)
+  runRunit = runnerFor "replace" { init = "runit"; };
+
   # nixpkgs with `nixos/lib/testing-python.nix` replaced.  Every test of
   # nixos/tests/all-tests.nix goes through it: `runTest` there is its
   # `evalTest`, old-style tests (make-test-python.nix) are its `makeTest`.
@@ -227,6 +230,20 @@ in
     rollback-systemd-boot = ./tests/rollback-systemd-boot.nix;
     rollback-grub = ./tests/rollback-grub.nix;
     rollback-limine = ./tests/rollback-limine.nix;
+  };
+
+  # ... and with runit (nixithos.init = "runit"):
+  #
+  #   nix-build -A runit.boot
+  runit = lib.mapAttrs (_: runRunit) {
+    boot = ./tests/boot.nix;
+    units = ./tests/units.nix;
+    switch = ./tests/switch.nix;
+    login = ./tests/login.nix;
+    elogind = ./tests/elogind.nix;
+    user-services = ./tests/user-services.nix;
+    sandbox = ./tests/sandbox.nix;
+    timesync = ./tests/timesync.nix;
   };
 
   # A scratch test for poking at a VM; not part of the suite.

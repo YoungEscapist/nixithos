@@ -1,5 +1,5 @@
 #!@bash@
-# unit-runtime - runs one compiled unit under s6 or dinit.
+# unit-runtime - runs one compiled unit under s6, dinit or runit.
 #
 # unitc turns every systemd unit into a small data file (shell variables and
 # functions) plus s6-rc service definitions whose scripts are one-liners
@@ -169,14 +169,19 @@ RT_FDHOLDER=$RT_STATE/.fdholder
 # The service manager: s6, or dinit.  dinit's init points /run/units/.db at
 # the unit database; a user's dinit --user has the link in its own directory
 # (UNIT_USER_STATE/db, see user-manager), where a user's s6 has a copy of
-# its compiled databases.  RT_DINITCTL: its control socket.
+# its compiled databases.  runit counts as dinit, as far as this goes: the
+# database is the same kind (runit/ in place of dinit/), and unit-rc answers
+# to what dinitctl is asked here.  RT_CTL: the command for its control socket.
 RT_INIT=s6
 if [[ $scope == system ]]; then
-  [[ -L /run/units/.db ]] && RT_INIT=dinit
-  RT_DINITCTL=/run/dinitctl
+  RT_CTL=(dinitctl -p /run/dinitctl)
+  if [[ -L /run/units/.db ]]; then
+    RT_INIT=dinit
+    [[ -d /run/units/.db/runit ]] && RT_CTL=(unit-rc -p /run/rcctl)
+  fi
 else
+  RT_CTL=(dinitctl -p "${UNIT_USER_STATE:-$XDG_RUNTIME_DIR}/dinitctl")
   [[ -L ${UNIT_USER_STATE:-$XDG_RUNTIME_DIR}/db ]] && RT_INIT=dinit
-  RT_DINITCTL=${UNIT_USER_STATE:-$XDG_RUNTIME_DIR}/dinitctl
 fi
 RT_CONSOLE=
 if [[ $scope == system && -r /etc/units/console-log ]]; then
@@ -1750,7 +1755,7 @@ cmd_job() {
     # keepalived's boot delay does): the trigger starts it like
     # `systemctl start`, with what it needs; it is not run to completion here.
     if [[ $RT_INIT == dinit ]]; then
-      dinitctl -p "$RT_DINITCTL" --quiet start "$(dinit_name "$U_ATOM")" || true
+      "${RT_CTL[@]}" --quiet start "$(dinit_name "$U_ATOM")" || true
       # (started as far as dinit knows, but it ran to completion, failed, or
       # was stopped by hand: its supervisor starts it again)
       if ! rt_up "$U_ATOM" && sv_status "$U_ATOM"; then

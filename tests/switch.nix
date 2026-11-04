@@ -192,7 +192,7 @@
     with subtest("switch"):
         print(machine.succeed("/run/current-system/specialisation/next/bin/switch-to-configuration test 2>&1"))
         machine.succeed("test \"$(cat /etc/t-file)\" = v2")
-        if init == "dinit":
+        if init != "s6":
             machine.succeed("test \"$(readlink -f /run/units/.db)\" = \"$(readlink -f /run/current-system/s6-db)\"")
         else:
             machine.succeed("test \"$(readlink -f /run/s6-rc/compiled)\" = \"$(readlink -f /run/current-system/s6-db)/compiled\"")
@@ -233,11 +233,12 @@
             assert pid(u) == before[u], f"{u} was restarted by the switch ({before[u]} -> {pid(u)})"
         failed = machine.succeed("systemctl list-units --failed --no-legend").strip()
         assert failed == "", f"failed units:\n{failed}"
-        if init == "dinit":
+        if init != "s6":
             # (nothing the switch took down along the way stays down: a target
             # is just "inactive" to systemctl)
-            down = machine.succeed("dinitctl list | grep -F '{X}' || true").strip()
-            assert down == "", f"dinit services down after the switch:\n{down}"
+            ctl = "rcctl" if init == "runit" else "dinitctl"
+            down = machine.succeed(f"{ctl} list | grep -F '{{X}}' || true").strip()
+            assert down == "", f"{init} services down after the switch:\n{down}"
 
     with subtest("and back"):
         print(machine.succeed("/run/booted-system/bin/switch-to-configuration test 2>&1"))

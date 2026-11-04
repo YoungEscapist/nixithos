@@ -4,8 +4,8 @@
 # (`${config.systemd.package}/bin/systemctl`, `…/example/tmpfiles.d/tmp.conf`)
 # and for feature flags (`config.systemd.package.withLogind`).  This package
 # keeps those references meaningful: it has the same layout, but the files in
-# it are small front-ends for the s6 tooling (or dinit's: the tools find out
-# which of the two runs the machine), and every feature flag that stands for
+# it are small front-ends for the s6 tooling (or dinit's, or runit's: the
+# tools find out which of them runs the machine), and every feature flag that stands for
 # a systemd daemon reports `false`.
 {
   lib,
@@ -26,6 +26,7 @@
   s6-rc,
   s6-linux-init,
   dinit,
+  runit,
   nixithos,
 
   # the init system of the configuration (nixithos.init): what `shutdown` is
@@ -64,6 +65,7 @@ let
           s6-rc
           s6-linux-init
           dinit
+          runit
           nixithos.unitTools
         ];
         runtime = "${nixithos.unitRuntime}/bin/unit-runtime";
