@@ -330,7 +330,7 @@ static void sq_put(FILE *f, const char *s) {
   fputc('\'', f);
 }
 
-static int write_script(const char *path, const char *shell, const svc *s, char **cmd, int piped) {
+static int write_script(const char *path, const char *shell, const svc *s, char **cmd, int piped, int islog) {
   char tmp[PATH_MAX + 8];
   snprintf(tmp, sizeof tmp, "%s.new", path);
   FILE *f = fopen(tmp, "w");
@@ -347,6 +347,9 @@ static int write_script(const char *path, const char *shell, const svc *s, char 
     sq_put(f, s->logfile);
     fputs(" 2>&1\n", f);
   }
+  /* a logger says it is ready on descriptor 3 (s6-log -d3, as s6-supervise
+   * has it set up); runsv has nothing there */
+  if (islog) fputs("exec 3>/dev/null\n", f);
   fputs("exec", f);
   for (char **p = cmd; *p; p++) { fputc(' ', f); sq_put(f, *p); }
   fputc('\n', f);
@@ -373,14 +376,14 @@ static void make_rsv(const svc *p, const svc *logger) {
     if (fd >= 0) close(fd);
   }
   snprintf(path, sizeof path, "%s/run", where);
-  if (write_script(path, sh_path, p, p->cmd, piped) < 0) say("%s: %s", path, strerror(errno));
+  if (write_script(path, sh_path, p, p->cmd, piped, 0) < 0) say("%s: %s", path, strerror(errno));
   if (piped) {
     svc plain;
     memset(&plain, 0, sizeof plain);
     snprintf(path, sizeof path, "%s/log", where);
     mkdir(path, 0755);
     snprintf(path, sizeof path, "%s/log/run", where);
-    if (write_script(path, sh_path, &plain, logger->log_cmd, 0) < 0) say("%s: %s", path, strerror(errno));
+    if (write_script(path, sh_path, &plain, logger->log_cmd, 0, 1) < 0) say("%s: %s", path, strerror(errno));
   }
   if (!exists && rename(tmp, dir) < 0) say("%s: %s", dir, strerror(errno));
 }
