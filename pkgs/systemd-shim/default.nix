@@ -67,6 +67,8 @@ let
           dinit
           runit
           nixithos.unitTools
+          nixithos.openrc
+          nixithos.openrcCtl
         ];
         runtime = "${nixithos.unitRuntime}/bin/unit-runtime";
       }

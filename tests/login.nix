@@ -29,7 +29,7 @@
   testScript =
     { nodes, ... }:
     ''
-    pid1 = "${if nodes.server.nixithos.init == "s6" then "s6-svscan" else nodes.server.nixithos.init}"
+    pid1 = "${if nodes.server.nixithos.init == "s6" then "s6-svscan" else if nodes.server.nixithos.init == "openrc" then "openrc-init" else nodes.server.nixithos.init}"
     start_all()
     server.wait_for_unit("multi-user.target")
     client.wait_for_unit("multi-user.target")

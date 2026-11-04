@@ -1,5 +1,5 @@
 #!@bash@
-# unit-runtime - runs one compiled unit under s6, dinit or runit.
+# unit-runtime - runs one compiled unit under s6, dinit, runit or OpenRC.
 #
 # unitc turns every systemd unit into a small data file (shell variables and
 # functions) plus s6-rc service definitions whose scripts are one-liners
@@ -178,6 +178,7 @@ if [[ $scope == system ]]; then
   if [[ -L /run/units/.db ]]; then
     RT_INIT=dinit
     [[ -d /run/units/.db/runit ]] && RT_CTL=(unit-rc -p /run/rcctl)
+    [[ -d /run/units/.db/openrc ]] && RT_CTL=(openrcctl -p /run/rcctl)
   fi
 else
   RT_CTL=(dinitctl -p "${UNIT_USER_STATE:-$XDG_RUNTIME_DIR}/dinitctl")

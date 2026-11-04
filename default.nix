@@ -80,6 +80,9 @@ let
   # ... and on the third (runit)
   runRunit = runnerFor "replace" { init = "runit"; };
 
+  # ... and on the fourth (OpenRC)
+  runOpenrc = runnerFor "replace" { init = "openrc"; };
+
   # nixpkgs with `nixos/lib/testing-python.nix` replaced.  Every test of
   # nixos/tests/all-tests.nix goes through it: `runTest` there is its
   # `evalTest`, old-style tests (make-test-python.nix) are its `makeTest`.
@@ -236,6 +239,20 @@ in
   #
   #   nix-build -A runit.boot
   runit = lib.mapAttrs (_: runRunit) {
+    boot = ./tests/boot.nix;
+    units = ./tests/units.nix;
+    switch = ./tests/switch.nix;
+    login = ./tests/login.nix;
+    elogind = ./tests/elogind.nix;
+    user-services = ./tests/user-services.nix;
+    sandbox = ./tests/sandbox.nix;
+    timesync = ./tests/timesync.nix;
+  };
+
+  # ... and with OpenRC (nixithos.init = "openrc"):
+  #
+  #   nix-build -A openrc.boot
+  openrc = lib.mapAttrs (_: runOpenrc) {
     boot = ./tests/boot.nix;
     units = ./tests/units.nix;
     switch = ./tests/switch.nix;

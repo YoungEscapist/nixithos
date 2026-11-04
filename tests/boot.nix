@@ -1,4 +1,4 @@
-# The system boots on s6 (or dinit, as dinit.boot, or runit, as runit.boot), reaches its default
+# The system boots on s6 (or dinit, as dinit.boot, runit, as runit.boot, or OpenRC, as openrc.boot), reaches its default
 # target with nothing failed, and shuts down cleanly.
 {
   name = "boot";
@@ -33,6 +33,17 @@
             machine.succeed('test "$(readlink -f /run/units/.db)" = "$(readlink -f /run/current-system/s6-db)"')
             machine.succeed("rcctl list | grep -q '^\\[\\[+\\]' ")
             print(machine.succeed("rcctl list"))
+            machine.succeed("readlink -f $(command -v poweroff) | grep -q systemctl")
+        elif init == "openrc":
+            machine.succeed("grep -qx openrc-init /proc/1/comm")
+            # the services are scripts in the database of this configuration,
+            # which OpenRC starts in the order it works out
+            machine.succeed("pgrep -f unit-supervise")
+            machine.succeed('test "$(readlink -f /run/units/.db)" = "$(readlink -f /run/current-system/s6-db)"')
+            machine.succeed("test -s /run/openrc/deptree && test \"$(cat /run/openrc/softlevel)\" = default")
+            machine.succeed("openrcctl list | grep -q '^\\[{+}' ")
+            print(machine.succeed("openrcctl list"))
+            print(machine.succeed("rc-status -a"))
             machine.succeed("readlink -f $(command -v poweroff) | grep -q systemctl")
         elif init == "dinit":
             machine.succeed("grep -qx dinit /proc/1/comm")

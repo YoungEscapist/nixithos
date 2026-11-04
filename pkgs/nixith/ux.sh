@@ -99,10 +99,11 @@ live_db() {
     if [ -n "${NIXITH_DB:-}" ]; then
         # (a database to look in, not the live one: for tests)
         WHY_DB=$NIXITH_DB
-        WHY_INIT=$(if [ -d /run/units/.db/runit ]; then echo runit; elif [ -L /run/units/.db ]; then echo dinit; else echo s6; fi)
+        WHY_INIT=$(if [ -d /run/units/.db/openrc ]; then echo openrc; elif [ -d /run/units/.db/runit ]; then echo runit; elif [ -L /run/units/.db ]; then echo dinit; else echo s6; fi)
     elif [ -L /run/units/.db ] && [ ! -e /run/s6-rc/compiled ]; then
         WHY_INIT=dinit
         [ -d /run/units/.db/runit ] && WHY_INIT=runit
+        [ -d /run/units/.db/openrc ] && WHY_INIT=openrc
         WHY_DB=$(readlink -f /run/units/.db)
     elif [ -e /run/s6-rc/compiled ]; then
         WHY_INIT=s6
@@ -199,7 +200,10 @@ why_unit() {
     local a
     for a in $atoms; do
         case $a in *-log | *-hooks) continue ;; esac
-        if [ "$WHY_INIT" = runit ]; then
+        if [ "$WHY_INIT" = openrc ]; then
+            dname "$a"
+            "$openrcctl" -p /run/rcctl status "$DN" 2>&1 | sed "s|^|        |" || true
+        elif [ "$WHY_INIT" = runit ]; then
             dname "$a"
             "$rcctl" -p /run/rcctl status "$DN" 2>&1 | sed "s|^|        |" || true
         elif [ "$WHY_INIT" = dinit ]; then

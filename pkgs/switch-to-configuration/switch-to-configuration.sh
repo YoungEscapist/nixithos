@@ -81,14 +81,21 @@ running_init=s6 running_kind=s6
 if [[ -L $STATE/.db && ! -e /run/s6-rc/compiled ]]; then
   running_init=dinit running_kind=dinit
   [[ -d $STATE/.db/runit ]] && running_kind=runit
+  [[ -d $STATE/.db/openrc ]] && running_kind=openrc
 fi
 new_init=s6 new_kind=s6
 [[ -d $new_db/dinit ]] && new_init=dinit new_kind=dinit
 [[ -d $new_db/runit ]] && new_init=dinit new_kind=runit
+[[ -d $new_db/openrc ]] && new_init=dinit new_kind=openrc
 # (a command to dinit that does not come back - a service that never gets to
 # where it is going - is a warning, not a switch that hangs for good)
 DINITCTL=(timeout 300 dinitctl -p /run/dinitctl)
 [[ $running_kind == runit ]] && DINITCTL=(timeout 300 unit-rc -p /run/rcctl)
+[[ $running_kind == openrc ]] && DINITCTL=(timeout 300 openrcctl -p /run/rcctl)
+# (where the descriptions of the services are in a database: OpenRC's are
+# scripts, init.d/)
+desc_dir=$running_kind
+[[ $running_kind == openrc ]] && desc_dir=openrc/init.d
 
 if [[ $running_init == dinit ]]; then
   live=$(readlink -f "$STATE/.db" 2>/dev/null) || live=
@@ -385,11 +392,20 @@ done
 
 if [[ $running_init == dinit ]]; then
   if [[ $new_db != "$old_db" ]]; then
+    if [[ $running_kind == openrc ]]; then
+      # (what is gone is stopped while OpenRC can still find its script)
+      while IFS= read -r line; do
+        line=${line:11}
+        name=${line%% *}
+        [[ -n $name && ! -e $new_db/$desc_dir/$name ]] || continue
+        "${DINITCTL[@]}" --quiet stop --force --ignore-unstarted "$name"
+      done <<< "$("${DINITCTL[@]}" list 2>/dev/null)"
+    fi
     ln -sfn "$new_db" "$STATE/.db"
     ln -sfn "$new_db" /nix/var/nix/gcroots/units-live 2>/dev/null
     # (unit-rc: a runsv for each process of the new database, none for those
-    # that are gone)
-    [[ $running_kind == runit ]] && "${DINITCTL[@]}" --quiet rescan
+    # that are gone; OpenRC: the dependencies of the new scripts)
+    [[ $running_kind == runit || $running_kind == openrc ]] && "${DINITCTL[@]}" --quiet rescan
     # What dinit has loaded and is described differently now is read again;
     # what is gone is unloaded once nothing refers to it any more.
     gone=()
@@ -397,8 +413,8 @@ if [[ $running_init == dinit ]]; then
       line=${line:11}
       name=${line%% *}
       [[ -n $name ]] || continue
-      if [[ ! -e $new_db/$running_kind/$name ]]; then gone+=("$name"); continue; fi
-      cmp -s "$old_db/$running_kind/$name" "$new_db/$running_kind/$name" && continue
+      if [[ ! -e $new_db/$desc_dir/$name ]]; then gone+=("$name"); continue; fi
+      cmp -s "$old_db/$desc_dir/$name" "$new_db/$desc_dir/$name" && continue
       if ! "${DINITCTL[@]}" --quiet reload "$name" 2>/dev/null; then
         # (a running service that cannot take the change - another kind of
         # service, a requirement that is not up - is stopped first; the

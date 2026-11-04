@@ -229,6 +229,12 @@ let
           --native ${nativeJSON}
         mkdir "$out/bin"
         ln -s ${runtime}/bin/unit-runtime ${pkgs.nixithos.unitTools}/bin/unit-supervise "$out/bin/"
+        ${lib.optionalString (config.nixithos.init == "openrc") ''
+          # the tools of the scripts (unitc --init openrc), through the database
+          ln -s ${pkgs.nixithos.unitTools}/bin/unit-svwait "$out/bin/"
+          ln -s ${pkgs.nixithos.openrc}/sbin/openrc-run ${pkgs.nixithos.openrc}/sbin/start-stop-daemon "$out/bin/"
+          for p in mkdir rm timeout; do ln -s ${pkgs.coreutils}/bin/$p "$out/bin/"; done
+        ''}
         ln -s "$units" "$out/units"
       '';
 

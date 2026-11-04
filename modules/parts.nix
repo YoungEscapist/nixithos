@@ -107,6 +107,7 @@ let
     ./s6
     ./dinit
     ./runit
+    ./openrc
     ./compat/units.nix
     ./compat/base-units.nix
     ./compat/package-units.nix

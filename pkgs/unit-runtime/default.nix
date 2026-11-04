@@ -49,6 +49,7 @@ replaceVarsWith {
         execline
         dinit
         nixithos.unitTools
+        nixithos.openrcCtl
         eudev
       ]
       ++ lib.optional withDbus dbus

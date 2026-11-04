@@ -1,6 +1,6 @@
 #!@shell@
 # systemctl - the part of systemctl that scripts and habits rely on, for a
-# system whose services are run by s6-rc, by dinit or by runit.
+# system whose services are run by s6-rc, by dinit, by runit or by OpenRC.
 #
 # Units are looked up in the index of the live service database (written by
 # unitc).  Starting a unit goes through s6-rc, so that what it requires comes
@@ -22,6 +22,11 @@
 # place of dinit: it answers to the same commands (unit-rc -p SOCKET list,
 # start, stop --force, …) and to the same status files.  What differs is the
 # end: runit-init 0 or 6, once the units are stopped.
+#
+# Under OpenRC (nixithos.init = "openrc") the same again, with openrcctl in the
+# place of dinit (the same commands, over rc-service and what OpenRC keeps in
+# /run/openrc); the end is openrc-shutdown, which has openrc-init stop the
+# services in order.
 
 PATH=@path@:$PATH
 RUNTIME=@runtime@
@@ -40,6 +45,7 @@ INIT=s6
 DINITCTL=(dinitctl -p /run/dinitctl)
 # (dinit's way of things, with unit-rc and runit for it)
 RUNIT=0
+OPENRC=0
 # (--user) whether the user has a manager running
 USER_MANAGER=0
 
@@ -52,7 +58,7 @@ warn() { echo "$me: $*" >&2; }
 
 # the service manager by name
 init_name() {
-  if (( RUNIT )); then echo runit; elif [[ $INIT == dinit ]]; then echo dinit; else echo s6-rc; fi
+  if (( RUNIT )); then echo runit; elif (( OPENRC )); then echo openrc; elif [[ $INIT == dinit ]]; then echo dinit; else echo s6-rc; fi
 }
 
 # Called once the options are known: which manager, and which database.
@@ -104,6 +110,9 @@ discover() {
     if [[ -d $STATE/.db/runit ]]; then
       RUNIT=1
       DINITCTL=(unit-rc -p /run/rcctl)
+    elif [[ -d $STATE/.db/openrc ]]; then
+      OPENRC=1
+      DINITCTL=(openrcctl -p /run/rcctl)
     fi
     return
   fi
@@ -1065,6 +1074,18 @@ power() {
   # halt | poweroff | reboot
   local flag
   case $1 in halt) flag=-h ;; poweroff) flag=-p ;; reboot) flag=-r ;; esac
+  if (( OPENRC )); then
+    # openrc-init stops the services in order, last started first, and
+    # powers off; nothing of that is left to this program (and it is not among
+    # the services it stops: the request is a line to a fifo)
+    case $1 in reboot) flag=-r ;; halt) flag=-H ;; *) flag=-p ;; esac
+    if (( opt_force >= 2 )); then
+      # -ff: at once, without stopping anything
+      sync
+      case $1 in reboot) echo b > /proc/sysrq-trigger ;; *) echo o > /proc/sysrq-trigger ;; esac
+    fi
+    exec openrc-shutdown "$flag" now
+  fi
   if [[ $INIT == dinit ]]; then
     local dsd
     if (( RUNIT )); then
@@ -1140,7 +1161,7 @@ case $verb in
     cat <<'EOF'
 systemctl [OPTIONS…] COMMAND [UNIT…]
 
-Front-end to s6-rc (or dinit, or runit) for systemd-style units.
+Front-end to s6-rc (or dinit, runit, OpenRC) for systemd-style units.
 
   start, stop, restart, try-restart, reload, reload-or-restart, kill
   status, show, cat, is-active, is-failed, is-enabled, is-system-running
@@ -1378,6 +1399,7 @@ EOF
   poweroff|halt|reboot) power "$verb" ;;
   kexec)
     if (( RUNIT )); then exec runit-init 6; fi
+    if (( OPENRC )); then exec openrc-shutdown -K now; fi
     if [[ $INIT == dinit ]]; then d=$(type -P dinitctl) && exec "${d%/*}/shutdown" -k; fi
     exec s6-linux-init-hpr -r ;;
   suspend|hibernate|hybrid-sleep|suspend-then-hibernate)

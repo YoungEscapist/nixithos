@@ -68,6 +68,13 @@ With --init runit the descriptions are the same (runit/ in place of dinit/),
 for unit-rc (pkgs/unit-tools/unit-rc.c), which does for runit what dinit does
 by itself: the services are the same, with unit-supervise as the process
 under runsv, and a logger is not a service but the log/ of its producer.
+
+With --init openrc the services are the same once more, as scripts for
+openrc-run (openrc/init.d/NAME), whose depend() has what dinit's description
+has as depends-on (need), waits-for (want) and after (after).  OpenRC knows
+what starts after what by itself; the processes run under unit-supervise
+(started by start-stop-daemon, waited for by unit-svwait), and a logger is the
+producer's, as under runit.
 """
 
 import argparse
@@ -75,6 +82,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import sys
 from collections import defaultdict
 
@@ -87,14 +95,20 @@ SUFFIXES = (
 # name between the two markers is looked up by the runtime.
 RT_OPEN, RT_CLOSE = "", ""
 
-# "s6", "dinit" or "runit": the service manager the output is for.  dinit and
-# runit have the same descriptions (see emit_dinit), and nearly the same
-# commands in them.
+# "s6", "dinit", "runit" or "openrc": the service manager the output is for.
+# dinit, runit and openrc have the same descriptions (see emit_dinit; openrc
+# as scripts), and nearly the same commands in them.
 INIT = "s6"
 
 
 def dinit_like():
-    return INIT in ("dinit", "runit")
+    return INIT in ("dinit", "runit", "openrc")
+
+
+def runit_like():
+    """Nobody holds a pipe for the supervisor of a process to say it is ready
+    on, and a logger is its producer's, not a service."""
+    return INIT in ("runit", "openrc")
 
 # "system": the units of the system manager.  "user": those of a user's
 # manager, where %t, %S, %h and friends name that user's directories, which
@@ -2053,7 +2067,7 @@ def emit_units(args, ctx, em):
                 opts = ["-n", str(args.notification_fd), "-s", sig, "-k", str(kill_ms), "-f", str(finish_ms)]
                 if u.all("ExecStop"):
                     opts.append("-h")
-                if INIT == "runit":
+                if runit_like():
                     # (nobody holds a pipe of its own: unit-rc reads the status)
                     opts.append("-m")
                 a["d"].update({
@@ -2083,7 +2097,7 @@ def emit_units(args, ctx, em):
                     # otherwise) and stopped last
                     a["d"]["log-type"] = "pipe"
                     a["waits"].add(u.atom + "-log")
-                    if INIT == "runit":
+                    if runit_like():
                         # (runsv runs it, as the log/ of the service)
                         log["d"].update({
                             "type": "internal",
@@ -2267,7 +2281,7 @@ def native_dinit(em, name, a):
             "start-timeout": dsec(ms("timeout-up")),
             "stop-timeout": dsec(ms("timeout-down")),
         })
-        if INIT == "runit":
+        if runit_like():
             # runsv does not tell when the daemon is ready, nor start it
             # again after a pause of its own: unit-supervise does both, for
             # a command as it is
@@ -2301,6 +2315,143 @@ DINIT_ORDER = (
 )
 
 
+def dwords(line):
+    """The words of a dinit command line (what dcmd wrote)."""
+    words = []
+    i, n = 0, len(line)
+    while i < n:
+        if line[i] == " ":
+            i += 1
+            continue
+        w = ""
+        while i < n and line[i] != " ":
+            if line[i] == '"':
+                i += 1
+                while line[i] != '"':
+                    if line[i] == "\\":
+                        i += 1
+                    elif line[i] == "$" and line[i + 1] == "$":
+                        i += 1
+                    w += line[i]
+                    i += 1
+                i += 1
+            else:
+                w += line[i]
+                i += 1
+        words.append(w)
+    return words
+
+
+def shell_words(line):
+    return " ".join(shlex.quote(w) for w in dwords(line))
+
+
+def openrc_script(args, em, name, a, props, deps):
+    """The service as a script for openrc-run (openrc/init.d/NAME).
+
+    The kinds of dependency are OpenRC's own: need (depends-on), want
+    (waits-for: started with it, not required) and after (an ordering between
+    services that start anyway).  What the script runs is the same as for the
+    other service managers; the tools are found through the database, as the
+    commands are (bin/).
+    """
+    bindir = os.path.join(args.final_out, "bin")
+    ssd = os.path.join(bindir, "start-stop-daemon")
+    svwait = os.path.join(bindir, "unit-svwait")
+    timeout = os.path.join(bindir, "timeout")
+    mkdir = os.path.join(bindir, "mkdir")
+    rm = os.path.join(bindir, "rm")
+    pidfile = "/run/units/.pid/" + name
+    kind = props["type"]
+    lines = [
+        "#!" + os.path.join(bindir, "openrc-run"),
+        "# " + a["unit"],
+        "description=" + shlex.quote(a["unit"]),
+        "",
+        "depend() {",
+    ]
+    wrote = False
+    for key, word in (("depends-on", "need"), ("waits-for", "want"), ("after", "after")):
+        names = [dname(dep) for k, dep in deps if k == key]
+        if names:
+            lines.append("\t%s %s" % (word, " ".join(shlex.quote(x) for x in names)))
+            wrote = True
+    if not wrote:
+        lines.append("\t:")
+    lines += ["}", ""]
+
+    workdir = props.get("working-dir", "/")
+    logfile = props.get("logfile")
+
+    def seconds(key, default=0):
+        try:
+            return int(float(props.get(key, default)))
+        except ValueError:
+            return default
+
+    if kind == "internal":
+        lines += ["start() { return 0; }", "stop() { return 0; }"]
+    elif kind == "scripted":
+        start_s = seconds("start-timeout")
+        stop_s = seconds("stop-timeout")
+
+        def run(cmd, limit):
+            text = shell_words(cmd)
+            if limit:
+                text = "%s -k 5 %d %s" % (shlex.quote(timeout), limit, text)
+            if logfile:
+                text += " >> %s 2>&1" % shlex.quote(logfile)
+            return text + " < /dev/null"
+
+        lines += ["start() {", "\tcd %s || return 1" % shlex.quote(workdir),
+                  "\t" + run(props["command"], start_s), "}", ""]
+        if "stop-command" in props:
+            lines += ["stop() {", "\tcd %s || return 1" % shlex.quote(workdir),
+                      "\t" + run(props["stop-command"], stop_s), "}"]
+        else:
+            lines += ["stop() { return 0; }"]
+    elif kind == "process":
+        start_s = seconds("start-timeout")
+        stop_s = seconds("stop-timeout", 300) or 300
+        # where its output goes: the logger of the service (the producer
+        # starts it, with a pipe), a file, or - nothing said - the console
+        sh = "exec 2>&1; exec \"$@\""
+        logopt = ""
+        logger = None
+        for dep in sorted(a["waits"]):
+            d = em.atoms[dep]["d"]
+            if d.get("consumer-of") == name and "log-command" in d:
+                logger = d["log-command"]
+        if props.get("log-type") == "pipe" and logger:
+            logopt = "--stdout-logger %s" % shlex.quote("exec 3>/dev/null; exec " + shell_words(logger))
+        elif logfile:
+            sh = "exec >> %s 2>&1; exec \"$@\"" % shlex.quote(logfile)
+        lines += [
+            "pidfile=%s" % shlex.quote(pidfile),
+            "",
+            "start() {",
+            "\t%s -p /run/units/.pid" % shlex.quote(mkdir),
+            "\t%s -f \"$pidfile\"" % shlex.quote(rm),
+            "\t%s --start --quiet --background --make-pidfile --pidfile \"$pidfile\" \\" % shlex.quote(ssd),
+            "\t\t--chdir %s %s \\" % (shlex.quote(workdir), logopt),
+            "\t\t--startas /bin/sh -- -c %s sh \\" % shlex.quote(sh),
+            "\t\t%s || return 1" % shell_words(props["command"]),
+            "\t%s -t %d %s \"$pidfile\"" % (shlex.quote(svwait), start_s, shlex.quote(name)),
+            "}",
+            "",
+            "stop() {",
+            "\t%s --stop --quiet --oknodo --pidfile \"$pidfile\" --retry TERM/%d/KILL/5" % (shlex.quote(ssd), stop_s),
+            "\trc=$?",
+            "\t%s -f \"$pidfile\"" % shlex.quote(rm),
+            "\treturn $rc",
+            "}",
+        ]
+    else:
+        die("%s: type %s has no OpenRC script" % (name, kind))
+    return "\n".join(lines) + "\n"
+
+
+
 def emit_dinit(args, ctx, em, boot_atoms):
     """dinit/: one description per service.
 
@@ -2317,12 +2468,14 @@ def emit_dinit(args, ctx, em, boot_atoms):
                 is over (/run/units/.booting goes)
     """
     out = os.path.join(args.out, INIT)
+    if INIT == "openrc":
+        out = os.path.join(out, "init.d")
     os.makedirs(out, exist_ok=True)
     for reserved in ("boot", "default"):
         if reserved in em.atoms:
             die("unit %s maps to the reserved dinit name %r" % (em.atoms[reserved]["unit"], reserved))
 
-    def description(comment, props, deps):
+    def description(comment, props, deps, name=None, a=None):
         props = dict(props)
         props.setdefault("restart", "false")
         if props["type"] != "internal":
@@ -2337,6 +2490,8 @@ def emit_dinit(args, ctx, em, boot_atoms):
                     props["logfile"] = args.catchall_log
         if "consumer-of" in props:
             props["consumer-of"] = dname(props["consumer-of"])
+        if INIT == "openrc":
+            return openrc_script(args, em, name, a, props, deps)
         lines = ["# %s" % comment]
         for k in list(DINIT_ORDER) + sorted(set(props) - set(DINIT_ORDER)):
             if k in props and props[k] != "":
@@ -2358,18 +2513,22 @@ def emit_dinit(args, ctx, em, boot_atoms):
             else:
                 deps.append(("after", dep))
         deps.extend(("waits-for", w) for w in sorted(a["waits"] - a["deps"]))
-        write(os.path.join(out, dname(name)), description(a["unit"], a["d"], deps))
+        write(os.path.join(out, dname(name)), description(a["unit"], a["d"], deps, name, a),
+              0o755 if INIT == "openrc" else 0o644)
 
     # names.tsv: atom -> dinit name, for the tools on the running system
     write(os.path.join(args.out, "names.tsv"),
           "".join("%s\t%s\n" % (a, dname(a)) for a in sorted(em.atoms)))
 
+    mode = 0o755 if INIT == "openrc" else 0o644
     write(os.path.join(out, "default"), description(
         "everything systemd would start for default.target",
-        {"type": "internal"}, [("waits-for", a) for a in boot_atoms]))
+        {"type": "internal"}, [("waits-for", a) for a in boot_atoms],
+        "default", {"unit": "everything systemd would start for default.target", "waits": set()}), mode)
     write(os.path.join(out, "boot"), description(
         "the boot: once default is up, it is over",
-        {"type": "scripted", "command": dcmd(args.runtime, "booted")}, [("waits-for", "default")]))
+        {"type": "scripted", "command": dcmd(args.runtime, "booted")}, [("waits-for", "default")],
+        "boot", {"unit": "the boot: once default is up, it is over", "waits": set()}), mode)
 
 
 def break_cycles(ctx, em):
@@ -2432,7 +2591,7 @@ def main():
     ap.add_argument("--scope", choices=("system", "user"), default="system",
                     help="whose units these are")
     ap.add_argument("--strict", action="store_true", help="fail on unknown references")
-    ap.add_argument("--init", choices=("s6", "dinit", "runit"), default="s6",
+    ap.add_argument("--init", choices=("s6", "dinit", "runit", "openrc"), default="s6",
                     help="the service manager to write for")
     ap.add_argument("--supervise", help="(dinit) path of unit-supervise")
     ap.add_argument("--execlineb", help="(dinit) execlineb, for native oneshots")

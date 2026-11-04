@@ -18,6 +18,7 @@ let
       s6 = config.system.build.s6InitBase;
       dinit = config.system.build.dinitInit;
       runit = config.system.build.runitInit;
+      openrc = config.system.build.openrcInit;
     }
     .${config.nixithos.init};
 in

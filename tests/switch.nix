@@ -236,7 +236,7 @@
         if init != "s6":
             # (nothing the switch took down along the way stays down: a target
             # is just "inactive" to systemctl)
-            ctl = "rcctl" if init == "runit" else "dinitctl"
+            ctl = {"runit": "rcctl", "openrc": "openrcctl"}.get(init, "dinitctl")
             down = machine.succeed(f"{ctl} list | grep -F '{{X}}' || true").strip()
             assert down == "", f"{init} services down after the switch:\n{down}"
 

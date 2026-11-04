@@ -20,6 +20,10 @@ final: prev: {
     # run time: the program each compiled unit runs through, and its helpers
     unitRuntime = self.callPackage ./unit-runtime { };
     unitTools = self.callPackage ./unit-tools { };
+    # OpenRC, which the init "openrc" runs the machine with
+    openrc = self.callPackage ./openrc { };
+    # ... and dinitctl's commands put to it
+    openrcCtl = self.callPackage ./openrc/ctl.nix { };
     # systemd.link(5) files, applied for eudev
     unitLink = self.callPackage ./unit-link { };
     # the mount namespace of sandboxed units (PrivateTmp=, ProtectSystem=, …)
