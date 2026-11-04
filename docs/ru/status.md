@@ -112,7 +112,7 @@
 
 | что | состояние |
 |---|---|
-| seccomp-директивы (`SystemCallFilter=`, `RestrictAddressFamilies=`, `MemoryDenyWriteExecute=`, `RestrictNamespaces=`…), `PrivateUsers=`, `ProtectProc=`, `RootImage=` | не применяются; у какого юнита — в `report.txt` базы |
+| `PrivateUsers=`, `PrivatePIDs=`, `RemoveIPC=`, `IPAddressAllow/Deny=` (нужен BPF), `DevicePolicy=`/`DeviceAllow=`, `SocketBind*=`, `RestrictFileSystems=`, `RootImage=`, лимиты ресурсов пользовательского сервиса | не применяются; сборка предупреждает о заданных в `systemd.services` (`nixithos.hardening.warnUnapplied`), все — в `report.txt` базы |
 | `.automount` | юнит пропускается, запись в отчёте |
 | экземпляр шаблона, которого нет в конфигурации (`systemctl start foo@new`) | не запускается; на этом стоит cockpit (`cockpit-wsinstance-https@ХЭШ.socket`). Собираются те, что названы в зависимостях, и те, у которых есть свой каталог drop-in (`gnome-session@gnome.target.d`) |
 | точка доступа connman (`connmanctl tether wifi`) | DNS-прокси connman не может занять порт 53 на интерфейсе tether; не разобрано |

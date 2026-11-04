@@ -116,6 +116,7 @@ let
     ./system/channel.nix
     ./system/nixith.nix
     ./system/fstab-units.nix
+    ./system/hardening.nix
     ./system/tmpfiles.nix
     ./system/boot/stage-1.nix
     ./system/boot/stage-2.nix

@@ -112,7 +112,7 @@ The suite is twelve tests (ten of our own and two runs of the same `boot` and
 
 | what | state |
 |---|---|
-| seccomp directives (`SystemCallFilter=`, `RestrictAddressFamilies=`, `MemoryDenyWriteExecute=`, `RestrictNamespaces=`…), `PrivateUsers=`, `ProtectProc=`, `RootImage=` | not applied; which unit has them is in the database's `report.txt` |
+| `PrivateUsers=`, `PrivatePIDs=`, `RemoveIPC=`, `IPAddressAllow/Deny=` (needs BPF), `DevicePolicy=`/`DeviceAllow=`, `SocketBind*=`, `RestrictFileSystems=`, `RootImage=`, resource limits of a user's service | not applied; the build warns about the ones set in `systemd.services` (`nixithos.hardening.warnUnapplied`), the database's `report.txt` has them all |
 | `.automount` | the unit is skipped, with an entry in the report |
 | a template instance that is not in the configuration (`systemctl start foo@new`) | does not start; cockpit depends on this (`cockpit-wsinstance-https@HASH.socket`). The ones named in dependencies and the ones with their own drop-in directory (`gnome-session@gnome.target.d`) are built |
 | connman's access point (`connmanctl tether wifi`) | connman's DNS proxy cannot take port 53 on the tether interface; not investigated |

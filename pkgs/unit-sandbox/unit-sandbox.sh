@@ -27,6 +27,9 @@
 #   --inaccessible P      P is empty and cannot be entered
 #   --bind S:D[:OPTS]     S mounted on D (OPTS: ro, norbind)
 #   --tmpfs P[:OPTS]      a fresh tmpfs on P
+#   --protect-proc M      ProtectProc=: a /proc of its own with hidepid=
+#                         (noaccess | invisible | ptraceable)
+#   --proc-subset         ProcSubset=pid: only the process directories in it
 #   --kernel-tunables     /proc/sys, /sys… read-only
 #   --cgroups             /sys/fs/cgroup read-only
 #   --loopback            bring `lo` up (after --net)
@@ -43,6 +46,7 @@ set -u
 ORIG_UMASK=$(umask)
 umask 0022
 
+protect_proc= proc_subset=0
 stage= private_tmp= devices=0 system= home= tunables=0 cgroups=0 loopback=0 R= apivfs=0 run_rw=0
 ro=() rw=() inacc=() binds=() tmpfs=()
 
@@ -63,6 +67,8 @@ while (( $# )); do
     --inaccessible) inacc+=("$2"); shift ;;
     --bind) binds+=("$2"); shift ;;
     --tmpfs) tmpfs+=("$2"); shift ;;
+    --protect-proc) protect_proc=$2; shift ;;
+    --proc-subset) proc_subset=1 ;;
     --kernel-tunables) tunables=1 ;;
     --cgroups) cgroups=1 ;;
     --loopback) loopback=1 ;;
@@ -141,6 +147,21 @@ if [[ -n $R ]]; then
       mkdir -p -- "$R/dev" && mount --rbind -- /dev "$R/dev" 2>/dev/null || warn "no /dev in the root"
     fi
     mkdir -p -- "$R/run" && mount -t tmpfs -o mode=0755 tmpfs "$R/run" 2>/dev/null || warn "no /run in the root"
+  fi
+fi
+
+# --------------------------------------------------------------------------
+# a /proc of its own: a new instance, with the options that hide processes
+# (the mounts of the host's /proc stay as they are; its options are the
+# instance's, so remounting would change them for everyone)
+
+if [[ -n $protect_proc ]] || (( proc_subset )); then
+  p=$(inside /proc)
+  if [[ -d $p ]]; then
+    opts=
+    [[ -n $protect_proc ]] && opts=hidepid=$protect_proc
+    (( proc_subset )) && opts+=${opts:+,}subset=pid
+    mount -t proc -o "$opts" proc "$p" 2>/dev/null || warn "cannot mount /proc with $opts"
   fi
 fi
 

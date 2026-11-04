@@ -437,9 +437,9 @@ $ cat /run/uncaught-logs/current    # лог загрузки и всего, у 
 
 ## Чего пока нет
 
-См. [docs/ru/status.md](docs/ru/status.md). Коротко: фильтры системных вызовов
-(`SystemCallFilter=`, `RestrictAddressFamilies=` — остальная песочница
-работает, список непримёненного в `report.txt` базы), `.automount`,
+См. [docs/ru/status.md](docs/ru/status.md). Коротко: `IPAddressDeny=`, `DeviceAllow=`, `PrivateUsers=` (остальная песочница и
+фильтры системных вызовов работают; сборка предупреждает о запрошенном и не
+применённом, весь список — в `report.txt` базы), `.automount`,
 экземпляры шаблонов, создаваемые на ходу (`systemctl start foo@new`, если ни
 одна зависимость и ни один drop-in его не называют), контейнеры.
 

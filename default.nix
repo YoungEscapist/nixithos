@@ -192,6 +192,7 @@ in
     elogind = ./tests/elogind.nix;
     user-services = ./tests/user-services.nix;
     sandbox = ./tests/sandbox.nix;
+    hardening = ./tests/hardening.nix;
     timesync = ./tests/timesync.nix;
     # an installed system: GRUB (BIOS) and Limine (UEFI) start s6 and reboot
     bootloader = ./tests/bootloader.nix;
@@ -217,6 +218,7 @@ in
     elogind = ./tests/elogind.nix;
     user-services = ./tests/user-services.nix;
     sandbox = ./tests/sandbox.nix;
+    hardening = ./tests/hardening.nix;
     timesync = ./tests/timesync.nix;
   };
 

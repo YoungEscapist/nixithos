@@ -2,7 +2,7 @@
  * unit-chroot - enter the root directory of a unit (RootDirectory=) and run
  * its command there.
  *
- *   unit-chroot [-k] [-B CAP]… [-d DIR] ROOT -- COMMAND [ARGUMENTS…]
+ *   unit-chroot [-k] [-B CAP]… [-S ARG]… [-d DIR] ROOT -- COMMAND [ARGUMENTS…]
  *
  * Runs after setpriv has dropped privileges to the unit's user, with
  * CAP_SYS_CHROOT as an ambient capability for the moment this takes
@@ -16,6 +16,10 @@
  * them with -B (sys_chroot, setpcap): they are taken out of the bounding
  * set after the chroot, CAP_SETPCAP last.  The command starts in DIR of
  * the new root (/ by default).
+ *
+ * -S gives it the options of unit-seccomp (one argument each): the filters
+ * are loaded here, when the root is entered, last before the command, since
+ * unit-seccomp itself is not in the new root.
  */
 
 #define _GNU_SOURCE
@@ -27,6 +31,9 @@
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+
+#define UNIT_SECCOMP_LIBRARY
+#include "unit-seccomp.c"
 
 #ifndef PR_CAP_AMBIENT
 #define PR_CAP_AMBIENT 47
@@ -50,7 +57,8 @@ static int drop_chroot_capability(void) {
 }
 
 int main(int argc, char **argv) {
-  int keep = 0, i = 1, drop_chroot = 0, drop_setpcap = 0;
+  int keep = 0, i = 1, drop_chroot = 0, drop_setpcap = 0, n_sec = 0;
+  char *sec[256];
   const char *dir = "/";
   while (i < argc && argv[i][0] == '-' && argv[i][1] && strcmp(argv[i], "--") != 0) {
     if (!strcmp(argv[i], "-k")) {
@@ -58,6 +66,9 @@ int main(int argc, char **argv) {
       i++;
     } else if (!strcmp(argv[i], "-d") && i + 1 < argc) {
       dir = argv[i + 1];
+      i += 2;
+    } else if (!strcmp(argv[i], "-S") && i + 1 < argc && n_sec < 255) {
+      sec[n_sec++] = argv[i + 1];
       i += 2;
     } else if (!strcmp(argv[i], "-B") && i + 1 < argc) {
       if (!strcmp(argv[i + 1], "sys_chroot")) drop_chroot = 1;
@@ -72,7 +83,7 @@ int main(int argc, char **argv) {
     }
   }
   if (i + 2 >= argc || strcmp(argv[i + 1], "--") != 0) {
-    fputs("usage: unit-chroot [-k] [-B CAP]… [-d DIR] ROOT -- COMMAND [ARGUMENTS…]\n", stderr);
+    fputs("usage: unit-chroot [-k] [-B CAP]… [-S ARG]… [-d DIR] ROOT -- COMMAND [ARGUMENTS…]\n", stderr);
     return 100;
   }
   const char *root = argv[i];
@@ -95,6 +106,18 @@ int main(int argc, char **argv) {
       (drop_setpcap && prctl(PR_CAPBSET_DROP, CAP_SETPCAP, 0, 0, 0) < 0)) {
     fprintf(stderr, "unit-chroot: cannot take capabilities out of the bounding set: %s\n", strerror(errno));
     return 226;
+  }
+  if (n_sec) {
+    sec[n_sec] = NULL;
+    for (int j = 0; j < n_sec;) {
+      int n = take_option(n_sec - j, sec + j);
+      if (!n) {
+        fprintf(stderr, "unit-chroot: -S %s: not an option of unit-seccomp\n", sec[j]);
+        return 100;
+      }
+      j += n;
+    }
+    if (apply_all() < 0) return EXIT_SECCOMP;
   }
   execvp(argv[i + 2], argv + i + 2);
   fprintf(stderr, "unit-chroot: %s: %s\n", argv[i + 2], strerror(errno));

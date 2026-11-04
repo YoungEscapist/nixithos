@@ -1068,7 +1068,17 @@ child_setup() {
     # a unit that has CAP_SYS_CHROOT of its own, or runs as root, keeps it
     [[ -z $u_uid || $u_uid == 0 || ${U_CAP_AMBIENT-} == *sys_chroot* ]] && keep=(-k)
     [[ -n ${U_WORKDIR-} ]] && keep+=(-d "${U_WORKDIR#-}")
+    # (the filters of SystemCallFilter= and the like are loaded by unit-chroot
+    # as it leaves: unit-seccomp is not in the new root)
+    local a
+    if (( ! privileged )); then
+      for a in ${U_SECCOMP[@]+"${U_SECCOMP[@]}"}; do keep+=(-S "$a"); done
+    fi
     pfx+=("$(type -P unit-chroot)" ${keep[@]+"${keep[@]}"} ${chroot_drop[@]+"${chroot_drop[@]}"} "$U_ROOTDIR" --)
+  elif (( ! privileged && ${#U_SECCOMP[@]} )); then
+    # the last thing before the command: the filter must let the steps above
+    # (changing user, dropping capabilities) through, and the exec
+    pfx+=("$(type -P unit-seccomp)" "${U_SECCOMP[@]}" --)
   fi
   return 0
 }
@@ -1096,8 +1106,8 @@ sandbox_prefix() {
     if (( drop )); then drop=0; continue; fi
     if (( full )); then
       case $a in
-        --private-tmp|--protect-system|--protect-home|--read-only|--inaccessible) drop=1; continue ;;
-        --private-devices|--kernel-tunables|--cgroups|--strict-run-writable|--private-network|--private-uts|--private-ipc|--loopback) continue ;;
+        --private-tmp|--protect-system|--protect-home|--protect-proc|--read-only|--inaccessible) drop=1; continue ;;
+        --private-devices|--proc-subset|--kernel-tunables|--cgroups|--strict-run-writable|--private-network|--private-uts|--private-ipc|--loopback) continue ;;
         --root|--bind|--read-write|--tmpfs) kept=1 ;;
       esac
     fi
