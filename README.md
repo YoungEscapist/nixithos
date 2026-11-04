@@ -219,6 +219,54 @@ builds stack as layers on top (`nixith parts` shows them); a full
 directory is no place for secrets: it is copied into the store, like
 everything else the configuration refers to by path.
 
+**See what a switch will do, and why a unit is as it is:**
+
+```console
+$ nixith diff                     # build, show what switching would change
+$ nixith diff --rollback          # …what going back a generation would change
+$ nixith why nginx                # why the unit runs (or not), how it ended
+$ sudo nixith services            # a console list of the units
+```
+
+`nixith diff` builds the system as `switch` would and, before switching,
+lists the units by what will happen to each: stopped (gone from the
+configuration), stopped and started again (`stopIfChanged`), restarted,
+reloaded (`reloadIfChanged`), started, or changed but left running
+(`restartIfChanged = false`) — each with the reason read off the unit
+definitions: `ExecStart changed (nginx-1.26 -> nginx-1.28)`,
+`restartTriggers changed (nginx.conf)`, `new unit`. Then the packages that
+change (`nix store diff-closures`; `--full` for all of the lines). It changes
+nothing; as root it also sees which units run now (`sudo nixith diff`).
+`--system PATH` compares an already built system. The same classification
+as `switch-to-configuration` uses, in `switch-to-configuration plan`.
+
+`nixith why UNIT` says what the service manager knows about a unit: its state
+and how it ended (exit status, or the signal), what s6 or dinit says of it,
+the chain of `Wants=`/`Requires=` from the default target that pulls it in
+(or that nothing does, and what starts it instead: a socket, a timer), who
+else pulls it, which of its dependencies failed, and the end of its log. The
+dependencies come from `deps.tsv` of the service database.
+
+`nixith services` is a list of the units (ncurses) with their states: `/`
+filters, `f` shows all, active, failed or inactive ones, Enter shows the
+status and the end of the log (`w`: the same as `nixith why`), `s`, `x`
+and `r` start, stop and restart through `systemctl` (these take root). `nixith
+services --list [FILTER]` prints the same as plain lines.
+
+**There is no `nixith rollback --service UNIT`**, and not for want of trying.
+A unit is more than its definition. Under s6 the definition is compiled into
+one binary database whose run scripts name their data by the path of that
+database; under dinit one link points at the database all services read. A
+single service from the previous generation would need a database made of
+two, recompiled, with the dependencies of both kept consistent, and the next
+`switch` would have to know that this unit is not what the running database
+says it is. And the old definition would run against the new `/etc`, users and
+files that the activation script laid down, which the service was never
+tested with. Use what is reliable: `nixith diff` to see before switching,
+`nixith rollback` for the whole system, or `nixith switch --only
+services.NAME` after putting the old text of that part back in the
+configuration.
+
 The other tools are subcommands or `nixith-*`: `nixith install`
 (`nixith-install`), `nixith generate-config` (writes to `/etc/nixith`),
 `nixith enter`, `nixith option`, `nixith version`, `nixith edit`.

@@ -2579,6 +2579,19 @@ def main():
         if target in units:
             index.append("\t".join([alias, "alias", target, "0", "0", units[target].atom, "", ""]))
     write(os.path.join(args.out, "index.tsv"), "\n".join(index) + "\n")
+    # deps.tsv: what each unit pulls in, for `nixith why` (who wants whom).
+    # One line per unit that pulls anything:  unit  requires  wants  binds
+    # (each a list of units, space separated): the edges as unitc has them
+    # in the end, those the unit files name and those it adds itself (the
+    # default dependencies, mounts, sockets).
+    write(os.path.join(args.out, "deps.tsv"), "".join(
+        "%s\t%s\t%s\t%s\n" % (
+            name,
+            " ".join(sorted(n for n in u.requires if n in units)),
+            " ".join(sorted(n for n in u.wants if n in units)),
+            " ".join(sorted(n for n in u.binds_to if n in units)))
+        for name, u in sorted(units.items())
+        if any(n in units for n in u.requires | u.wants | u.binds_to)))
     # devices.tsv: units to start when a device shows up (unit files linked
     # into X.device.wants).  One line per device:  path  units
     lines = []
