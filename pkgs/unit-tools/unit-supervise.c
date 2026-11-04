@@ -3,7 +3,9 @@
  * supervises this process in turn (dinit): what s6-supervise is for s6.
  *
  *   unit-supervise [-a ATOM] [-n FD] [-s SIGNAL] [-k MS] [-f MS] [-d DIR] [-h]
- *                  -- RUNTIME VERB DATA
+ *                  [-m] -- RUNTIME VERB DATA
+ *   unit-supervise [-a ATOM] [-n FD] [-s SIGNAL] [-k MS] [-d DIR] [-C DIR] [-m]
+ *                  -e -- COMMAND [ARGUMENT…]
  *
  * Runs `RUNTIME VERB DATA`.  For VERB `run` (a unit's main process) the
  * contract is s6-supervise's: when it ends, `RUNTIME finish DATA CODE SIGNUM`
@@ -25,6 +27,12 @@
  *   -s SIGNAL  what stops the process (KillSignal=; default TERM)
  *   -k MS      after that long, SIGKILL (0: never)
  *   -f MS      how long finish may take (default 90000)
+ *   -e         run COMMAND as it is, in place of the runtime's VERB: a
+ *              service that is not a unit; started again whenever it ends
+ *   -C DIR     (with -e) where it runs (default /)
+ *   -m         the service manager does not have a pipe of ours but reads the
+ *              status: it still expects the service to get ready (runit's
+ *              unit-rc), so a start that ends before that has failed
  *   -h         the unit has ExecStop=: before the process is stopped, run
  *              `RUNTIME stop-hook DATA` and wait for it (s6 has an atom of
  *              its own for this, the unit's -hooks)
@@ -78,6 +86,9 @@ static int mgr_fd = -1;        /* the service manager's pipe, until told */
 static int kill_sig = SIGTERM;
 static long kill_ms = 0, finish_ms = 90000;
 static char *runtime, *verb, *data;
+static char **literal;         /* -e: the command as it is */
+static const char *workdir = "/";
+static int expect;             /* -m */
 static int with_finish, with_hook, hook_done;
 
 static enum phase phase = P_WAIT;
@@ -129,11 +140,11 @@ static void write_status(int gone) {
 
 /* the service manager hears about the first readiness only */
 static void tell_manager(void) {
+  told = 1;
   if (mgr_fd < 0) return;
   if (write(mgr_fd, "\n", 1) < 0) {}
   close(mgr_fd);
   mgr_fd = -1;
-  told = 1;
 }
 
 static void child_signals(void) {
@@ -164,8 +175,9 @@ static void start_run(void) {
       if (p[1] == nfd) fcntl(nfd, F_SETFD, 0);
       else dup2(p[1], nfd);
     }
-    if (chdir("/") < 0) {}
-    execl(runtime, runtime, verb, data, (char *)NULL);
+    if (chdir(literal ? workdir : "/") < 0) {}
+    if (literal) execvp(literal[0], literal);
+    else execl(runtime, runtime, verb, data, (char *)NULL);
     _exit(127);
   }
   if (p[1] >= 0) close(p[1]);
@@ -220,7 +232,7 @@ static void next(int finish_code) {
     return;
   }
   if (finish_code == 125) {
-    if (!told && mgr_fd >= 0) {
+    if (!told && (mgr_fd >= 0 || expect)) {
       /* never up: as far as the service manager goes, the start failed */
       write_status(1);
       exit(1);
@@ -300,7 +312,8 @@ static void on_exit_status(int status) {
 }
 
 static void usage(void) {
-  fprintf(stderr, "usage: unit-supervise [-a ATOM] [-n FD] [-s SIG] [-k MS] [-f MS] [-d DIR] [-h] -- RUNTIME VERB DATA\n");
+  fprintf(stderr, "usage: unit-supervise [-a ATOM] [-n FD] [-s SIG] [-k MS] [-f MS] [-d DIR] [-h] [-m] -- RUNTIME VERB DATA\n"
+                  "       unit-supervise [-a ATOM] [-n FD] [-s SIG] [-k MS] [-d DIR] [-C DIR] [-m] -e -- COMMAND…\n");
   exit(100);
 }
 
@@ -322,7 +335,7 @@ static int parse_signal(const char *s) {
 int main(int argc, char **argv) {
   const char *dir = NULL;
   int opt;
-  while ((opt = getopt(argc, argv, "a:n:s:k:f:d:h")) != -1) {
+  while ((opt = getopt(argc, argv, "a:n:s:k:f:d:hmeC:")) != -1) {
     switch (opt) {
       case 'a': atom = optarg; break;
       case 'n': nfd = atoi(optarg); break;
@@ -331,14 +344,22 @@ int main(int argc, char **argv) {
       case 'f': finish_ms = atol(optarg); break;
       case 'd': dir = optarg; break;
       case 'h': with_hook = 1; break;
+      case 'm': expect = 1; break;
+      case 'e': literal = (char **)1; break;
+      case 'C': workdir = optarg; break;
       default: usage();
     }
   }
-  if (argc - optind != 3) usage();
-  runtime = argv[optind];
-  verb = argv[optind + 1];
-  data = argv[optind + 2];
-  with_finish = !strcmp(verb, "run");
+  if (literal) {
+    if (argc - optind < 1) usage();
+    literal = argv + optind;
+  } else {
+    if (argc - optind != 3) usage();
+    runtime = argv[optind];
+    verb = argv[optind + 1];
+    data = argv[optind + 2];
+    with_finish = !strcmp(verb, "run");
+  }
 
   char base[PATH_MAX];
   if (dir) {
@@ -426,7 +447,7 @@ int main(int argc, char **argv) {
             break;
           }
           case SIGINT:
-            if (!told && mgr_fd >= 0) timed_out = 1;
+            if (!told && (mgr_fd >= 0 || expect)) timed_out = 1;
             /* fall through */
           case SIGTERM:
           case SIGUSR2:

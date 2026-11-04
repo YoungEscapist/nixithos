@@ -63,6 +63,11 @@ and for what comes after it.  The descriptions name everything through
 --final-out, the database of the configuration that runs: for the system a
 path (/run/units/.db), for a user's manager (dinit --user) `${UNIT_USER_STATE}/db`,
 which dinit fills in when it reads them, as bash does in the unit data.
+
+With --init runit the descriptions are the same (runit/ in place of dinit/),
+for unit-rc (pkgs/unit-tools/unit-rc.c), which does for runit what dinit does
+by itself: the services are the same, with unit-supervise as the process
+under runsv, and a logger is not a service but the log/ of its producer.
 """
 
 import argparse
@@ -82,8 +87,14 @@ SUFFIXES = (
 # name between the two markers is looked up by the runtime.
 RT_OPEN, RT_CLOSE = "", ""
 
-# "s6" or "dinit": the service manager the output is for.
+# "s6", "dinit" or "runit": the service manager the output is for.  dinit and
+# runit have the same descriptions (see emit_dinit), and nearly the same
+# commands in them.
 INIT = "s6"
+
+
+def dinit_like():
+    return INIT in ("dinit", "runit")
 
 # "system": the units of the system manager.  "user": those of a user's
 # manager, where %t, %S, %h and friends name that user's directories, which
@@ -2042,6 +2053,9 @@ def emit_units(args, ctx, em):
                 opts = ["-n", str(args.notification_fd), "-s", sig, "-k", str(kill_ms), "-f", str(finish_ms)]
                 if u.all("ExecStop"):
                     opts.append("-h")
+                if INIT == "runit":
+                    # (nobody holds a pipe of its own: unit-rc reads the status)
+                    opts.append("-m")
                 a["d"].update({
                     "type": "process",
                     "command": em.dsv(u.atom, "run", name, *opts),
@@ -2069,13 +2083,21 @@ def emit_units(args, ctx, em):
                     # otherwise) and stopped last
                     a["d"]["log-type"] = "pipe"
                     a["waits"].add(u.atom + "-log")
-                    log["d"].update({
-                        "type": "process",
-                        "command": dcmd(args.runtime, "log", u.atom),
-                        "consumer-of": u.atom,
-                        "ready-notification": "pipefd:3",
-                    })
-                    log["d"].update(DINIT_FOREVER)
+                    if INIT == "runit":
+                        # (runsv runs it, as the log/ of the service)
+                        log["d"].update({
+                            "type": "internal",
+                            "log-command": dcmd(args.runtime, "log", u.atom),
+                            "consumer-of": u.atom,
+                        })
+                    else:
+                        log["d"].update({
+                            "type": "process",
+                            "command": dcmd(args.runtime, "log", u.atom),
+                            "consumer-of": u.atom,
+                            "ready-notification": "pipefd:3",
+                        })
+                        log["d"].update(DINIT_FOREVER)
                     u.atoms.append(u.atom + "-log")
                 if u.all("ExecStop") and INIT == "s6":
                     hooks = em.add_atom(u.atom + "-hooks", "oneshot", name)
@@ -2216,7 +2238,7 @@ def emit_native(path, em):
             em.require(name, dep)
         if svc["type"] == "bundle":
             a["contents"] = list(svc.get("contents", []))
-        if INIT == "dinit":
+        if dinit_like():
             native_dinit(em, name, a)
     return list(spec.get("default", []))
 
@@ -2245,6 +2267,15 @@ def native_dinit(em, name, a):
             "start-timeout": dsec(ms("timeout-up")),
             "stop-timeout": dsec(ms("timeout-down")),
         })
+        if INIT == "runit":
+            # runsv does not tell when the daemon is ready, nor start it
+            # again after a pause of its own: unit-supervise does both, for
+            # a command as it is
+            opts = ["-a", name]
+            if "notification-fd" in files:
+                opts += ["-n", str(ms("notification-fd"))]
+            a["d"]["command"] = dcmd(args.supervise, *opts, "-m", "-C", here, "-e", "--",
+                                     os.path.join(here, "run"))
         a["d"].update(DINIT_FOREVER)
         if "notification-fd" in files:
             a["d"]["ready-notification"] = "pipefd:%d" % ms("notification-fd")
@@ -2285,7 +2316,7 @@ def emit_dinit(args, ctx, em, boot_atoms):
       boot      what dinit starts; once default is up it says that the boot
                 is over (/run/units/.booting goes)
     """
-    out = os.path.join(args.out, "dinit")
+    out = os.path.join(args.out, INIT)
     os.makedirs(out, exist_ok=True)
     for reserved in ("boot", "default"):
         if reserved in em.atoms:
@@ -2401,7 +2432,7 @@ def main():
     ap.add_argument("--scope", choices=("system", "user"), default="system",
                     help="whose units these are")
     ap.add_argument("--strict", action="store_true", help="fail on unknown references")
-    ap.add_argument("--init", choices=("s6", "dinit"), default="s6",
+    ap.add_argument("--init", choices=("s6", "dinit", "runit"), default="s6",
                     help="the service manager to write for")
     ap.add_argument("--supervise", help="(dinit) path of unit-supervise")
     ap.add_argument("--execlineb", help="(dinit) execlineb, for native oneshots")
@@ -2414,8 +2445,8 @@ def main():
     global SCOPE, INIT, FINAL_OUT_VAR
     SCOPE = args.scope
     INIT = args.init
-    if INIT == "dinit" and not args.supervise:
-        die("--init dinit needs --supervise")
+    if dinit_like() and not args.supervise:
+        die("--init %s needs --supervise" % INIT)
     # --final-out as `${NAME}/…`: where the database is differs from one
     # manager to the next (a user's: ${UNIT_USER_STATE}/db), and dinit fills
     # it in when it reads a description; the unit data has it in double
@@ -2546,7 +2577,7 @@ def main():
 
     # the "default" bundle: everything systemd would start for default.target
     boot_atoms = sorted({a for n in boot for a in units[n].atoms} | set(native_default))
-    if INIT == "dinit":
+    if dinit_like():
         emit_dinit(args, ctx, em, boot_atoms)
     else:
         em.flush(os.path.join(args.out, "source-boot"), "deps")
@@ -2667,7 +2698,7 @@ def main():
     n_atoms = len(em.atoms)
     sys.stderr.write(
         "unitc: %d units -> %d %s services (%d in the default bundle); %d units with notes, see report.txt\n"
-        % (len(units), n_atoms, "dinit" if INIT == "dinit" else "s6-rc", len(boot_atoms), len(report.items)))
+        % (len(units), n_atoms, INIT if dinit_like() else "s6-rc", len(boot_atoms), len(report.items)))
 
 
 if __name__ == "__main__":
