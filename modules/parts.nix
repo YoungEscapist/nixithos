@@ -108,6 +108,7 @@ let
     ./dinit
     ./runit
     ./openrc
+    ./finit
     ./compat/units.nix
     ./compat/base-units.nix
     ./compat/package-units.nix

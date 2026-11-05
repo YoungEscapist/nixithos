@@ -20,6 +20,8 @@ final: prev: {
     # run time: the program each compiled unit runs through, and its helpers
     unitRuntime = self.callPackage ./unit-runtime { };
     unitTools = self.callPackage ./unit-tools { };
+    finit = self.callPackage ./finit { };
+    finitCtl = self.callPackage ./finit/ctl.nix { };
     # OpenRC, which the init "openrc" runs the machine with
     openrc = self.callPackage ./openrc { };
     # ... and dinitctl's commands put to it

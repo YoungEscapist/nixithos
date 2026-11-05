@@ -48,6 +48,13 @@ EOF
     exit 1 ;;
 esac
 
+# Finit is currently a boot-only experimental backend. Do not partially
+# activate a generation until its configuration reconciliation is tested.
+if [[ $action == switch || $action == test ]] && [[ -d /run/units/.db/finit ]]; then
+  echo "Finit live activation is not implemented yet; use nixith boot and reboot." >&2
+  exit 1
+fi
+
 STATE=/run/units
 SCAN=/run/service
 
@@ -81,16 +88,19 @@ running_init=s6 running_kind=s6
 if [[ -L $STATE/.db && ! -e /run/s6-rc/compiled ]]; then
   running_init=dinit running_kind=dinit
   [[ -d $STATE/.db/runit ]] && running_kind=runit
+  [[ -d $STATE/.db/finit ]] && running_kind=finit
   [[ -d $STATE/.db/openrc ]] && running_kind=openrc
 fi
 new_init=s6 new_kind=s6
 [[ -d $new_db/dinit ]] && new_init=dinit new_kind=dinit
 [[ -d $new_db/runit ]] && new_init=dinit new_kind=runit
+[[ -d $new_db/finit ]] && new_init=dinit new_kind=finit
 [[ -d $new_db/openrc ]] && new_init=dinit new_kind=openrc
 # (a command to dinit that does not come back - a service that never gets to
 # where it is going - is a warning, not a switch that hangs for good)
 DINITCTL=(timeout 300 dinitctl -p /run/dinitctl)
 [[ $running_kind == runit ]] && DINITCTL=(timeout 300 unit-rc -p /run/rcctl)
+[[ $running_kind == finit ]] && DINITCTL=(timeout 300 finitctl -p /run/finit)
 [[ $running_kind == openrc ]] && DINITCTL=(timeout 300 openrcctl -p /run/rcctl)
 # (where the descriptions of the services are in a database: OpenRC's are
 # scripts, init.d/)
