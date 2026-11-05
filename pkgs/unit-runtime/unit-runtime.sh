@@ -178,6 +178,7 @@ if [[ $scope == system ]]; then
   if [[ -L /run/units/.db ]]; then
     RT_INIT=dinit
     [[ -d /run/units/.db/runit ]] && RT_CTL=(unit-rc -p /run/rcctl)
+    [[ -d /run/units/.db/finit ]] && RT_CTL=(finitctl -p /run/finit)
     [[ -d /run/units/.db/openrc ]] && RT_CTL=(openrcctl -p /run/rcctl)
   fi
 else

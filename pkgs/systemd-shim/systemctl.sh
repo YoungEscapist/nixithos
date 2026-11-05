@@ -46,6 +46,7 @@ DINITCTL=(dinitctl -p /run/dinitctl)
 # (dinit's way of things, with unit-rc and runit for it)
 RUNIT=0
 OPENRC=0
+FINIT=0
 # (--user) whether the user has a manager running
 USER_MANAGER=0
 
@@ -58,7 +59,7 @@ warn() { echo "$me: $*" >&2; }
 
 # the service manager by name
 init_name() {
-  if (( RUNIT )); then echo runit; elif (( OPENRC )); then echo openrc; elif [[ $INIT == dinit ]]; then echo dinit; else echo s6-rc; fi
+  if (( FINIT )); then echo finit; elif (( RUNIT )); then echo runit; elif (( OPENRC )); then echo openrc; elif [[ $INIT == dinit ]]; then echo dinit; else echo s6-rc; fi
 }
 
 # Called once the options are known: which manager, and which database.
@@ -110,6 +111,9 @@ discover() {
     if [[ -d $STATE/.db/runit ]]; then
       RUNIT=1
       DINITCTL=(unit-rc -p /run/rcctl)
+    elif [[ -d $STATE/.db/finit ]]; then
+      FINIT=1
+      DINITCTL=(finitctl -p /run/finit)
     elif [[ -d $STATE/.db/openrc ]]; then
       OPENRC=1
       DINITCTL=(openrcctl -p /run/rcctl)
@@ -1101,6 +1105,9 @@ power() {
   # halt | poweroff | reboot
   local flag
   case $1 in halt) flag=-h ;; poweroff) flag=-p ;; reboot) flag=-r ;; esac
+  if (( FINIT )); then
+    case $1 in reboot) exec @finit@/sbin/initctl reboot ;; halt) exec @finit@/sbin/initctl halt ;; *) exec @finit@/sbin/initctl poweroff ;; esac
+  fi
   if (( OPENRC )); then
     # openrc-init stops the services in order, last started first, and
     # powers off; nothing of that is left to this program (and it is not among

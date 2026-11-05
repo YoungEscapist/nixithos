@@ -68,10 +68,12 @@ let
           runit
           nixithos.unitTools
           nixithos.openrc
+          nixithos.finitCtl
           nixithos.openrcCtl
         ];
         runtime = "${nixithos.unitRuntime}/bin/unit-runtime";
       }
+      // lib.optionalAttrs (name == "systemctl") { finit = "${nixithos.finit}"; }
       // lib.optionalAttrs (name == "systemd-analyze") {
         analyze = if clientTools != null then "${clientTools}/bin/systemd-analyze" else "";
       };

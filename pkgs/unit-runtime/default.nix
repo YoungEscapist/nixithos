@@ -49,6 +49,7 @@ replaceVarsWith {
         execline
         dinit
         nixithos.unitTools
+        nixithos.finitCtl
         nixithos.openrcCtl
         eudev
       ]

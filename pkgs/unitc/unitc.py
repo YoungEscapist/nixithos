@@ -75,6 +75,10 @@ has as depends-on (need), waits-for (want) and after (after).  OpenRC knows
 what starts after what by itself; the processes run under unit-supervise
 (started by start-stop-daemon, waited for by unit-svwait), and a logger is the
 producer's, as under runit.
+
+With --init finit, the experimental backend writes native Finit service/task
+stanzas and readiness conditions. Its current scope and limitations are in
+docs/finit.md.
 """
 
 import argparse
@@ -95,20 +99,20 @@ SUFFIXES = (
 # name between the two markers is looked up by the runtime.
 RT_OPEN, RT_CLOSE = "", ""
 
-# "s6", "dinit", "runit" or "openrc": the service manager the output is for.
+# "s6", "dinit", "runit", "openrc" or "finit": the service manager the output is for.
 # dinit, runit and openrc have the same descriptions (see emit_dinit; openrc
 # as scripts), and nearly the same commands in them.
 INIT = "s6"
 
 
 def dinit_like():
-    return INIT in ("dinit", "runit", "openrc")
+    return INIT in ("dinit", "runit", "openrc", "finit")
 
 
 def runit_like():
     """Nobody holds a pipe for the supervisor of a process to say it is ready
     on, and a logger is its producer's, not a service."""
-    return INIT in ("runit", "openrc")
+    return INIT in ("runit", "openrc", "finit")
 
 # "system": the units of the system manager.  "user": those of a user's
 # manager, where %t, %S, %h and friends name that user's directories, which
@@ -2456,6 +2460,85 @@ def openrc_script(args, em, name, a, props, deps):
 
 
 
+def emit_finit(args, ctx, em, boot_atoms):
+    """Experimental native Finit graph. User managers remain s6 trees."""
+    out = os.path.join(args.out, "finit")
+    os.makedirs(out, exist_ok=True)
+    active = set(boot_atoms)
+    pending = list(active)
+    while pending:
+        a = em.atoms[pending.pop()]
+        for dep in a["hard"] | a["waits"]:
+            if dep not in active:
+                active.add(dep)
+                pending.append(dep)
+
+    def ident(name):
+        # Native names cannot contain Finit's :instance or condition syntax.
+        return "n-" + hashlib.sha256(name.encode()).hexdigest()[:20]
+
+    def ready(name):
+        a = em.atoms[name]
+        return ("service/%s/ready" if a["d"]["type"] == "process" else "task/%s/success") % ident(name)
+
+    lines = []
+    # Finit 4.17 stores conditions in a 192-byte field, separately from
+    # its 1024-byte input line. Leave room for NUL and future modifiers.
+    def conditions(name, deps):
+        conds = [ready(dep) for dep in sorted(deps)]
+        depth = 0
+        while len(",".join(conds)) > 160:
+            reduced = []
+            for i in range(0, len(conds), 3):
+                title = ident("barrier-%s-%d-%d" % (name, depth, i))
+                lines.append("task [2345] name:%s remain:yes <!%s> %s -c true" %
+                             (title, ",".join(conds[i:i+3]), args.bash))
+                reduced.append("task/%s/success" % title)
+            conds = reduced
+            depth += 1
+        return "<!%s>" % ",".join(conds)
+
+    for name, a in sorted(em.atoms.items()):
+        props = a["d"]
+        deps = a["deps"] | a["waits"]
+        # Ordering-only edges only matter for services actually in this boot.
+        deps = {d for d in deps if d in active or d in a["hard"] | a["waits"]}
+        cond = conditions(name, deps)
+        manual = "" if name in active else " manual:yes"
+        script = ["#!%s" % args.bash]
+        if props["type"] == "process":
+            notified = "ready-notification" in props
+            if notified:
+                script.append('export UNIT_SV_READY_FD=$1')
+            if a["files"].get("producer-for"):
+                close_ready = 'eval "exec $UNIT_SV_READY_FD>&-"; ' if notified else ""
+                script.append('exec > >(%sexec 3>/dev/null; exec %s log %s)' %
+                              (close_ready, sq(args.runtime), sq(name)))
+                script.append("exec 2>&1")
+            else:
+                script.append("exec >> %s 2>&1" % sq(args.catchall_log))
+            script.append("exec " + props["command"])
+            command = "%s %s%s" % (args.bash, os.path.join(args.final_out, "finit", "run-" + name), " %n" if notified else "")
+            line = "service [2345] name:%s%s notify:%s norestart kill:60 %s %s" % (
+                ident(name), manual, "s6" if notified else "none", cond, command)
+        else:
+            command = props.get("command", args.bash + " -c true")
+            script.append("exec >> %s 2>&1" % sq(args.catchall_log))
+            script.append("exec " + command)
+            line = "task [2345] name:%s%s remain:yes %s %s %s" % (
+                ident(name), manual, cond, args.bash, os.path.join(args.final_out, "finit", "run-" + name))
+        write(os.path.join(out, "run-" + name), "\n".join(script) + "\n", 0o755)
+        write(os.path.join(out, dname(name)), line + "\n")
+        lines.append(line)
+    bootconds = conditions("boot", set(boot_atoms))
+    lines.append("task [2345] name:nixith-boot remain:yes %s %s booted" % (bootconds, args.runtime))
+    write(os.path.join(out, "services.conf"), "\n".join(lines) + "\n")
+    write(os.path.join(args.out, "finit-names.tsv"), "".join(
+        "%s\t%s\n" % (dname(name), ident(name)) for name in sorted(em.atoms)))
+    write(os.path.join(args.out, "names.tsv"), "".join(
+        "%s\t%s\n" % (name, dname(name)) for name in sorted(em.atoms)))
+
+
 def emit_dinit(args, ctx, em, boot_atoms):
     """dinit/: one description per service.
 
@@ -2612,7 +2695,7 @@ def main():
     ap.add_argument("--scope", choices=("system", "user"), default="system",
                     help="whose units these are")
     ap.add_argument("--strict", action="store_true", help="fail on unknown references")
-    ap.add_argument("--init", choices=("s6", "dinit", "runit", "openrc"), default="s6",
+    ap.add_argument("--init", choices=("s6", "dinit", "runit", "openrc", "finit"), default="s6",
                     help="the service manager to write for")
     ap.add_argument("--supervise", help="(dinit) path of unit-supervise")
     ap.add_argument("--execlineb", help="(dinit) execlineb, for native oneshots")
@@ -2757,7 +2840,9 @@ def main():
 
     # the "default" bundle: everything systemd would start for default.target
     boot_atoms = sorted({a for n in boot for a in units[n].atoms} | set(native_default))
-    if dinit_like():
+    if INIT == "finit":
+        emit_finit(args, ctx, em, boot_atoms)
+    elif dinit_like():
         emit_dinit(args, ctx, em, boot_atoms)
     else:
         em.flush(os.path.join(args.out, "source-boot"), "deps")

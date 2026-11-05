@@ -32,6 +32,7 @@ replaceVarsWith {
       dinit
       runit
       nixithos.unitTools
+      nixithos.finitCtl
       nixithos.openrcCtl
     ];
     runtime = "${nixithos.unitRuntime}/bin/unit-runtime";

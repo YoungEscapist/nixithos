@@ -19,6 +19,7 @@ let
       dinit = config.system.build.dinitInit;
       runit = config.system.build.runitInit;
       openrc = config.system.build.openrcInit;
+      finit = config.system.build.finitInit;
     }
     .${config.nixithos.init};
 in
