@@ -4,9 +4,9 @@
 
 <p align="center"><img src="branding/nixithos.png" alt="NixithOS" width="420"></p>
 
-NixOS, в котором нет systemd: PID 1 — `s6-linux-init`, сервисами управляет
-`s6-rc` (или, если выбрать, и то и другое — `dinit`), устройствами — `eudev`,
-логами — `s6-log`.
+NixOS без systemd: init-система и менеджер служб на выбор — s6, dinit,
+runit или OpenRC. Устройствами управляет `eudev`, журналами — `s6-log`.
+По умолчанию используются `s6-linux-init` и `s6-rc`.
 
 Это не переписанный дистрибутив, а слой поверх обычного nixpkgs
 (сейчас — ветка `nixos-26.05`). Конфигурация остаётся конфигурацией NixOS:

@@ -3,9 +3,12 @@
 **English** · [Русский](ru/status.md)
 
 Checked by tests in QEMU (`nix-build -A tests.<name>`), nixpkgs `nixos-26.05`.
-The suite is twelve tests (ten of our own and two runs of the same `boot` and
-`units` through `nixosModules.default`), and all of them pass. `tests.rebuild`
-(`boot` in `rebuild` mode, hours of building) is not part of the suite.
+The core checks are available as `tests.*` for s6, `dinit.*`, `runit.*` and
+`openrc.*`: boot, units, switch, login, user-services, elogind, sandbox and
+timesync. Additional checks cover module integration, hardening, boot loaders
+and automatic rollback. Release notes record the checks run for each pinned
+nixpkgs revision. `tests.rebuild` (`boot` in `rebuild` mode, hours of building)
+is separate from the normal suite.
 
 ## Works
 

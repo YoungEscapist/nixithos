@@ -38,13 +38,13 @@
 
 rustPlatform.buildRustPackage (finalAttrs: {
   pname = "parallax";
-  version = "0.1.0-unstable-2026-10-26";
+  version = "0.1.0-unstable-2026-11-04";
 
   src = fetchFromGitHub {
     owner = "YoungEscapist";
     repo = "parallax-wm";
-    rev = "a279285eb584fddfc8080318ecab0441333f9d68"; # ветка popups-20261024: окошки панели, виртуальный ввод, window{ above }, виджеты переносятся
-    hash = "sha256-IHOjlLlFJ4CDRCwt4rHeShWxzPRWINou5EdLtCPCzMg=";
+    rev = "1ebaadf6808d8bc232f9720bd16de02ae77d501f"; # ветка nixith-20261105 (поверх popups-20261024): окошки панели, виртуальный ввод, window{ above }, виджеты переносятся, big picture, раскладка в панели по Alt+Shift, сторож и перезапуск Xwayland (и по очереди X-сокета)
+    hash = "sha256-wnSUKap4RIBrCDvTSAxJ7OfuxD86aSjZuBZ9Lf+M/JI=";
   };
 
   cargoHash = "sha256-QbbQI84MnObdbDjqkzY3cfJkIelhP1Ihvc3AE5q4mmY=";

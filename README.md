@@ -4,9 +4,9 @@
 
 <p align="center"><img src="branding/nixithos.png" alt="NixithOS" width="420"></p>
 
-NixOS without systemd: PID 1 is `s6-linux-init`, services are run by
-`s6-rc` (or, if you choose it, both are `dinit`), devices by `eudev`, logs
-by `s6-log`.
+NixOS without systemd: choose s6, dinit, runit or OpenRC as the init system
+and service manager. Devices are managed by `eudev`, logs by `s6-log`.
+The default is `s6-linux-init` with `s6-rc`.
 
 This is not a rewritten distribution but a layer on top of ordinary nixpkgs
 (currently the `nixos-26.05` branch). The configuration is still a NixOS

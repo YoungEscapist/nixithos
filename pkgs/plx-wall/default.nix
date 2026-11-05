@@ -21,13 +21,13 @@
 
 rustPlatform.buildRustPackage {
   pname = "plx-wall";
-  version = "0.1.0-unstable-2026-10-18";
+  version = "0.1.0-unstable-2026-10-30";
 
   src = fetchFromGitHub {
     owner = "YoungEscapist";
     repo = "plx-wall";
-    rev = "61cc7ecf5ca23c50e9ca02f4a4336ab68800f161"; # ветка nixith-20261018: живые обои через GBM-dmabuf
-    hash = "sha256-yYk55mQi2old1lHhZBauW1MSmwLuwISHNc3LLoKry0M=";
+    rev = "335ed5f53ea2de06e4f35a327fb5e7b471177824"; # ветка nixith-20261105: живые обои через GBM-dmabuf, big picture, снимки не откатывают бинды
+    hash = "sha256-14DVbeVGVV1OvNkzuk1aH4UO2ZJGOKs/L7cgYuBzINw=";
   };
 
   cargoHash = "sha256-GHLewEOilCdC32bJ+nFAldkx31TxUmBITsvUVEMtQoQ=";

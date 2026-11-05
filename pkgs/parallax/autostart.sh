@@ -111,6 +111,19 @@ if ! dbus-send --session --print-reply --dest=org.freedesktop.DBus / \
     children="$children $!"
 fi
 
+# the device link (services.nixith-connect), raised again whenever it falls
+if [ -e /etc/nixith-connect/autostart ] && command -v nixconnect >/dev/null 2>&1; then
+    (
+        log=${XDG_STATE_HOME:-$HOME/.local/state}/nixith-connect.log
+        mkdir -p "${log%/*}"
+        while kill -0 "$pid" 2>/dev/null; do
+            nixconnect daemon >>"$log" 2>&1 || true
+            sleep 2
+        done
+    ) &
+    children="$children $!"
+fi
+
 # the wallpapers, raised again whenever they fall, for as long as the
 # compositor lives
 while kill -0 "$pid" 2>/dev/null; do
