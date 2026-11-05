@@ -131,6 +131,7 @@ let
     ./services/logging.nix
     ./services/timesyncd.nix
     ./services/hostname.nix
+    ./services/nixith-connect.nix
     ./desktop/dwl.nix
     ./desktop/lxqt.nix
     ./desktop/desktops.nix
