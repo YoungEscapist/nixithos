@@ -191,6 +191,9 @@
 
     with subtest("switch"):
         print(machine.succeed("/run/current-system/specialisation/next/bin/switch-to-configuration test 2>&1"))
+        # A service started by the switch must not inherit its transaction
+        # lock, or a subsequent switch hangs until that service exits.
+        machine.succeed("flock -n /run/nixos/switch-to-configuration.lock true")
         machine.succeed("test \"$(cat /etc/t-file)\" = v2")
         if init != "s6":
             machine.succeed("test \"$(readlink -f /run/units/.db)\" = \"$(readlink -f /run/current-system/s6-db)\"")

@@ -33,7 +33,7 @@ set -euo pipefail
 : "${NI_SHELL:=bash}"        # bash zsh fish nushell
 : "${NI_LOADER:=systemd-boot}"  # systemd-boot limine grub refind (UEFI)
 : "${NI_KERNEL:=linuxPackages}"  # pkgs.<this>: linuxPackages_latest, _zen...
-: "${NI_INIT:=s6}"            # s6 dinit (nixithos.init)
+: "${NI_INIT:=s6}"            # s6 dinit runit openrc (nixithos.init)
 : "${NI_UNFREE:=0}"
 : "${NI_NM_KEEP:=}"          # NetworkManager profiles to keep, a file a line
 : "${NI_DRY:=0}"
@@ -55,8 +55,8 @@ case $NI_KERNEL in
     *) fail "NI_KERNEL: $NI_KERNEL is not a kernel of nixpkgs" ;;
 esac
 case $NI_INIT in
-    s6 | dinit) ;;
-    *) fail "NI_INIT: $NI_INIT is not an init system of NixithOS (s6, dinit)" ;;
+    s6 | dinit | runit | openrc) ;;
+    *) fail "NI_INIT: $NI_INIT is not an init system of NixithOS (s6, dinit, runit, openrc)" ;;
 esac
 
 # a Nix string
@@ -158,13 +158,13 @@ EOF
     fi
     if [ "$NI_INIT" = s6 ]; then
         cat << 'EOF'
-  # The init system: s6 (s6-linux-init and s6-rc), the default.  The other
-  # one takes over at the next boot after a switch: nixithos.init = "dinit";
+  # The init system: s6 (s6-linux-init and s6-rc), the default.
+  # Alternatives: nixithos.init = "dinit", "runit" or "openrc" (after a reboot).
 
 EOF
     else
         cat << EOF
-  # The init system: dinit, in place of s6 (the default).
+  # The init system: $NI_INIT, in place of s6 (the default).
   nixithos.init = "$NI_INIT";
 
 EOF

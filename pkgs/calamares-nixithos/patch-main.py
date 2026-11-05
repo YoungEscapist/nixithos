@@ -7,7 +7,7 @@
 #   - the users' shell (bash, zsh, fish or nushell);
 #   - the boot loader (systemd-boot, Limine, GRUB or rEFInd on UEFI; GRUB on
 #     BIOS);
-#   - the init system (s6 or dinit: nixithos.init);
+#   - the init system (s6, dinit, runit or openrc: nixithos.init);
 #   - the configuration in /etc/nixith, written by `nixith generate-config`
 #     and installed by `nixith install`;
 #   - the name: NixithOS, and "nixith" for a machine nobody named.
@@ -113,6 +113,16 @@ NIXITHOS_INITS = {
     "dinit": """\\
   # The init system: dinit, in place of s6 (the default).
   nixithos.init = "dinit";
+
+""",
+    "runit": """\\
+  # The init system: runit, in place of s6 (the default).
+  nixithos.init = "runit";
+
+""",
+    "openrc": """\\
+  # The init system: OpenRC, in place of s6 (the default).
+  nixithos.init = "openrc";
 
 """,
 }

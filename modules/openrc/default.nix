@@ -13,8 +13,8 @@
 #             of s6-supervise (readiness, finish, the status in
 #             /run/units/.sv/ATOM), and the oneshots are commands
 #   runlevels sysinit and boot are empty (stage 1 and 2 of NixOS did that
-#             work); default has `boot`, which wants everything systemd would
-#             start for default.target and then says the boot is over;
+#             work); default lists the boot services so OpenRC can order
+#             them; `boot` waits for them and then says the boot is over;
 #             shutdown has `final` (below)
 #   shutdown  `systemctl poweroff` and friends tell openrc-init (openrc-shutdown),
 #             which stops every service in the reverse order of the start,
@@ -106,9 +106,16 @@ let
 
   # /etc/runlevels: the runlevels, with what is in them
   runlevels = pkgs.runCommand "openrc-runlevels" { } ''
-    mkdir -p $out/sysinit $out/boot $out/default $out/shutdown $out/single
-    ln -s /run/units/.db/openrc/init.d/boot $out/default/boot
+    mkdir -p $out/sysinit $out/boot $out/shutdown $out/single
+    ln -s /run/units/.db/openrc/runlevels/default $out/default
     ln -s /etc/init.d/final $out/shutdown/final
+  '';
+
+  # What a script finds when it is run by rc-service from somewhere else than
+  # openrc-init: OpenRC leaves a shell's environment out (but for a few
+  # variables) and adds what is here.
+  profileEnv = pkgs.writeText "profile.env" ''
+    PATH='${openrc}/bin:${unitTools}/bin:${initCfg.path}'
   '';
 
   rcConf = pkgs.writeText "rc.conf" ''
@@ -148,6 +155,7 @@ in
 
     environment.etc = {
       "rc.conf".source = rcConf;
+      "profile.env".source = profileEnv;
       "runlevels".source = runlevels;
       "init.d/final".source = final;
     };

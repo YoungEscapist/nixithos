@@ -62,12 +62,15 @@ svc_state() {
   echo stopped
 }
 
-# the output of rc-service: its warnings and errors, the rest when asked for
+# The switch holds descriptor 9 as its transaction lock. OpenRC launches
+# services as children of rc-service, so do not pass that lock to daemons:
+# otherwise the next switch waits for the lifetime of the new service.
+# The caller retains its own descriptor until the transaction is complete.
 rcs() {
   if (( quiet )); then
-    EINFO_QUIET=yes "$rc_service" "$@"
+    EINFO_QUIET=yes "$rc_service" "$@" 9>&-
   else
-    "$rc_service" "$@"
+    "$rc_service" "$@" 9>&-
   fi
 }
 
@@ -91,17 +94,21 @@ case $cmd in
         [[ -e $f || -L $f ]] && st[${f##*/}]=$s
       done
     done
+    out=
     for f in "$SCRIPTS"/*; do
       n=${f##*/}
       [[ -e $f ]] || continue
       case ${st[$n]-} in
-        started) printf '[{+}     ] %s\n' "$n" ;;
-        starting) printf '[{ }<<   ] %s\n' "$n" ;;
-        stopping) printf '[{ }>>   ] %s\n' "$n" ;;
-        inactive) printf '[{+}     ] %s\n' "$n" ;;
-        *) printf '[     {-}] %s\n' "$n" ;;
+        started|inactive) out+="[{+}     ] $n"$'\n' ;;
+        starting) out+="[{ }<<   ] $n"$'\n' ;;
+        stopping) out+="[{ }>>   ] $n"$'\n' ;;
+        *) out+="[     {-}] $n"$'\n' ;;
       esac
     done
+    # (whoever reads it may stop reading: grep -q)
+    trap '' PIPE
+    printf '%s' "$out" 2> /dev/null
+    exit 0
     ;;
   status)
     [[ -n $name ]] || { echo "openrcctl: status: which service?" >&2; exit 1; }

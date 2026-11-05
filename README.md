@@ -132,9 +132,9 @@ $ rcctl list | head -3
 services as scripts for `openrc-run`, written by `unitc --init openrc`: what
 dinit's descriptions call depends-on, waits-for and after is `need`, `want`
 and `after` in `depend()`, and OpenRC itself works out what starts after what
-(in parallel; the default runlevel has one service, `boot`, which wants
-everything). The processes of a service run under `unit-supervise`, started by
-`start-stop-daemon` and waited for by `unit-svwait`; the oneshots are
+(in parallel; the default runlevel lists the boot services so ordering
+between them is honoured, and `boot` waits for the whole set). The processes
+of a service run under `unit-supervise`, started by `start-stop-daemon` and waited for by `unit-svwait`; the oneshots are
 commands. `openrcctl list`, `openrcctl start …` are the commands of
 `dinitctl` over `rc-service`, which systemctl and `switch-to-configuration`
 use; a switch moves the link `/run/units/.db` and has OpenRC read the
@@ -427,7 +427,7 @@ is copied into the installed system. `nixith-net` starts that step alone, on
 any system. One step Calamares did not have is the kernel: the long-term one
 NixOS uses by default (it is on the image), the newest, the older long-term
 6.12 or 6.6, Zen or XanMod (`boot.kernelPackages`; all of them come from the
-NixOS cache). After it comes the init system: s6, or dinit
+NixOS cache). After it comes the init system: s6, dinit, runit or OpenRC
 (`nixithos.init`). Nothing is written until the summary is confirmed; then [install.sh](pkgs/nixith-installer/install.sh)
 partitions the disk (GPT: a 1 GiB EFI partition, or a BIOS boot partition,
 and ext4 or btrfs for the rest) or takes what is mounted on `/mnt`, writes

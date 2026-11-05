@@ -197,6 +197,12 @@ static const struct opt inits[] = {
     { "dinit", "dinit",
       "dinit as PID 1 and service manager: one small program that knows what a service requires from what it only comes after, as systemd does. The same units, systemctl and logs as with s6.",
       "dinit как PID 1 и менеджер служб: одна небольшая программа, которая, как systemd, отличает то, что службе нужно, от того, после чего она лишь идёт. Те же юниты, systemctl и журналы, что и с s6." },
+    { "runit", "runit",
+      "runit as PID 1, with runsv supervising each service. The same NixOS units, systemctl and logs; user services run on s6.",
+      "runit как PID 1, runsv следит за каждой службой. Те же юниты NixOS, systemctl и журналы; пользовательские службы работают на s6." },
+    { "openrc", "OpenRC",
+      "OpenRC as PID 1 and service manager, with parallel startup ordered by dependencies. The same NixOS units, systemctl and logs; user services run on s6.",
+      "OpenRC как PID 1 и менеджер служб, с параллельным запуском по зависимостям. Те же юниты NixOS, systemctl и журналы; пользовательские службы работают на s6." },
 };
 #define NINITS (int)(sizeof inits / sizeof *inits)
 
@@ -1178,8 +1184,8 @@ static int step_welcome(void)
     int sel = ru;
     struct menu m = {
         .title = T("Welcome to NixithOS", "Добро пожаловать в NixithOS"),
-        .intro = T("NixOS without systemd: the same packages and configuration, with s6 or dinit running the system. Choose the language of the installer.",
-                   "NixOS без systemd: те же пакеты и конфигурация, а систему запускает s6 или dinit. Выберите язык установщика."),
+        .intro = T("NixOS without systemd: the same packages and configuration, with s6, dinit, runit or OpenRC running the system. Choose the language of the installer.",
+                   "NixOS без systemd: те же пакеты и конфигурация, а систему запускает s6, dinit, runit или OpenRC. Выберите язык установщика."),
         .art = art, .nart = nart, .items = langs, .n = 2,
         .keys = "↑↓  Enter  F10",
     };
@@ -2542,8 +2548,8 @@ static int step_kernel(void)
 static int step_init(void)
 {
     return choose(T("Init system", "Init-система"),
-                  T("What starts the system and runs its services. Both run the same configuration: the services of NixOS's modules, systemctl, journalctl. It can be changed later: nixithos.init in /etc/nixith/configuration.nix, and a reboot.",
-                    "То, что запускает систему и её службы. Обе работают с одной и той же конфигурацией: службы модулей NixOS, systemctl, journalctl. Сменить можно и потом: nixithos.init в /etc/nixith/configuration.nix и перезагрузка."),
+                  T("What starts the system and runs its services. All run the same configuration: the services of NixOS's modules, systemctl, journalctl. It can be changed later: nixithos.init in /etc/nixith/configuration.nix, and a reboot.",
+                    "То, что запускает систему и её службы. Все работают с одной и той же конфигурацией: службы модулей NixOS, systemctl, journalctl. Сменить можно и потом: nixithos.init в /etc/nixith/configuration.nix и перезагрузка."),
                   inits, NINITS, &S.init);
 }
 
@@ -2872,9 +2878,9 @@ static const struct tip {
     const char *kicker[2], *title[2], *body[2], *cmd, *img;
 } tips[] = {
     { { "NixithOS", "NixithOS" }, { "NixOS, without systemd", "NixOS без systemd" },
-      { "PID 1 is s6-linux-init with s6-rc, or dinit: the one chosen. Devices are eudev's, logs s6-log's. The packages, the modules and configuration.nix are NixOS's own.",
-        "PID 1 — s6-linux-init с s6-rc или dinit, что выбрано. Устройства — от eudev, журналы — от s6-log. Пакеты, модули и configuration.nix — те же, что в NixOS." },
-      "cat /proc/1/comm      # s6-svscan, dinit", NULL },
+      { "PID 1 is s6-linux-init, dinit, runit or OpenRC: the one chosen. Devices are eudev's, logs s6-log's. The packages, the modules and configuration.nix are NixOS's own.",
+        "PID 1 — s6-linux-init, dinit, runit или OpenRC, что выбрано. Устройства — от eudev, журналы — от s6-log. Пакеты, модули и configuration.nix — те же, что в NixOS." },
+      "cat /proc/1/comm      # s6-svscan, dinit, runit, openrc-init", NULL },
     { { "Configuration", "Конфигурация" }, { "One file describes the whole system", "Вся система описана одним файлом" },
       { "Users, services, desktop, packages: everything is in /etc/nixith/configuration.nix. Change it, then build and switch to it in one go.",
         "Пользователи, службы, рабочий стол, пакеты — всё в /etc/nixith/configuration.nix. Измените его, а потом соберите систему и переключитесь на неё одной командой." },
@@ -2892,8 +2898,8 @@ static const struct tip {
         "build-vm собирает ту же систему в скрипт, который запускает её в QEMU, не трогая работающую." },
       "nixith build-vm && ./result/bin/run-*-vm", NULL },
     { { "Services", "Службы" }, { "systemctl still works", "systemctl по-прежнему работает" },
-      { "It is a thin wrapper over s6-rc or dinit: start, stop, restart, status. The native tools are there too.",
-        "Это тонкая обёртка над s6-rc или dinit: start, stop, restart, status. Родные инструменты тоже на месте." },
+      { "It is a thin wrapper over the selected service manager: start, stop, restart, status. The native tools are there too.",
+        "Это тонкая обёртка над выбранным менеджером служб: start, stop, restart, status. Родные инструменты тоже на месте." },
       "systemctl restart sshd\ns6-rc -a list        # dinitctl list", NULL },
     { { "Services", "Службы" }, { "Logs are plain files", "Журналы — обычные файлы" },
       { "Every service writes to /var/log/s6/<service>/ through its own logger; journalctl -u reads those directories.",

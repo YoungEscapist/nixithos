@@ -2441,9 +2441,12 @@ def openrc_script(args, em, name, a, props, deps):
             "}",
             "",
             "stop() {",
-            "\t%s --stop --quiet --oknodo --pidfile \"$pidfile\" --retry TERM/%d/KILL/5" % (shlex.quote(ssd), stop_s),
+            # OpenRC 0.64's deprecated --oknodo reports failure when the
+            # retry schedule observes that the process has already exited.
+            # Without it, an already stopped daemon is a successful stop.
+            "\t%s --stop --quiet --pidfile \"$pidfile\" --retry TERM/%d/KILL/5" % (shlex.quote(ssd), stop_s),
             "\trc=$?",
-            "\t%s -f \"$pidfile\"" % shlex.quote(rm),
+            "\t[ \"$rc\" -eq 0 ] && %s -f \"$pidfile\"" % shlex.quote(rm),
             "\treturn $rc",
             "}",
         ]
@@ -2520,6 +2523,23 @@ def emit_dinit(args, ctx, em, boot_atoms):
     # names.tsv: atom -> dinit name, for the tools on the running system
     write(os.path.join(args.out, "names.tsv"),
           "".join("%s\t%s\n" % (a, dname(a)) for a in sorted(em.atoms)))
+
+    if INIT == "openrc":
+        # OpenRC only honours `after` for services in the runlevel (or
+        # already started). A runlevel containing just `boot` loses ordering
+        # between its wanted services when they start in parallel.
+        active = set(boot_atoms)
+        pending = list(active)
+        while pending:
+            atom = em.atoms[pending.pop()]
+            for dep in atom["hard"] | atom["waits"]:
+                if dep not in active:
+                    active.add(dep)
+                    pending.append(dep)
+        runlevel = os.path.join(args.out, "openrc", "runlevels", "default")
+        os.makedirs(runlevel, exist_ok=True)
+        for name in sorted(active | {"boot", "default"}):
+            os.symlink("../../init.d/" + dname(name), os.path.join(runlevel, dname(name)))
 
     mode = 0o755 if INIT == "openrc" else 0o644
     write(os.path.join(out, "default"), description(

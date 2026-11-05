@@ -132,7 +132,8 @@ $ rcctl list | head -3
 ему отдаются скриптами для `openrc-run`, которые пишет `unitc --init openrc`:
 то, что в описаниях dinit зовётся depends-on, waits-for и after, здесь `need`,
 `want` и `after` в `depend()`, а что за чем стартует, OpenRC считает сам
-(параллельно; в уровне default одна служба, `boot`, которая хочет всё).
+(параллельно; в уровне default перечислены загрузочные службы, чтобы их
+порядок учитывался, а `boot` ждёт весь набор).
 Процессы службы идут под `unit-supervise`, их запускает `start-stop-daemon`, а
 готовности ждёт `unit-svwait`; oneshot-ы — просто команды. `openrcctl list`,
 `openrcctl start …` — команды `dinitctl` поверх `rc-service`, ими пользуются
@@ -416,8 +417,9 @@ nixith-installer — небольшая программа на C поверх n
 отдельно, в любой системе. Шаг, которого у Calamares не было, — ядро:
 долгосрочное, которое NixOS ставит по умолчанию (оно лежит на образе), самое
 новое, более старые долгосрочные 6.12 или 6.6, Zen или XanMod
-(`boot.kernelPackages`; все они из кэша NixOS). За ним — init-система: s6 или
-dinit (`nixithos.init`). До подтверждения итога ничего не записывается; потом
+(`boot.kernelPackages`; все они из кэша NixOS). За ним — init-система: s6,
+dinit, runit или OpenRC (`nixithos.init`). До подтверждения итога ничего не
+записывается; потом
 [install.sh](pkgs/nixith-installer/install.sh) размечает диск (GPT: EFI-раздел
 на 1 ГиБ или раздел BIOS boot, остальное — ext4 или btrfs) или берёт то, что
 смонтировано в `/mnt`, пишет `/etc/nixith/configuration.nix` так же, как
