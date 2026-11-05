@@ -876,6 +876,28 @@ do_restart() {
       dinit_start "$unit" || rc=1
       continue
     fi
+    if (( OPENRC && only_if_active )) && is_longrun "$unit" && sv_status "${I_ATOM[$unit]}"; then
+      # rc-service starts children in its caller's security context. A
+      # resolvconf hook inside NetworkManager cannot grant nscd CAP_CHOWN
+      # again. Keep the existing supervisor, which was started by init,
+      # and let its runtime perform the requested restart (also Restart=no).
+      local previous_pid=$sv_pid timeout_ms i restarted=0
+      : > "$STATE/$unit/restart-requested"
+      kill -HUP "$sv_svpid" || { rc=1; continue; }
+      timeout_ms=$(( $(unit_timeout "$unit" START) + $(unit_timeout "$unit" STOP) ))
+      (( timeout_ms > 0 )) || timeout_ms=90000
+      for (( i = 0; i < timeout_ms / 100; i++ )); do
+        sleep 0.1
+        sv_status "${I_ATOM[$unit]}" || break
+        if (( sv_ready )) && [[ -n $sv_pid && $sv_pid != "$previous_pid" ]]; then
+          restarted=1
+          break
+        fi
+        [[ $sv_phase == idle ]] && break
+      done
+      (( restarted )) || rc=1
+      continue
+    fi
     if [[ $INIT == dinit ]] && is_rc_up "${I_ATOM[$unit]}"; then
       # (--force: what requires it is restarted with it, as with systemd)
       dname "${I_ATOM[$unit]}"

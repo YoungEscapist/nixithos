@@ -130,6 +130,23 @@
             '';
           };
         };
+        # A restart requested by a restricted service (resolvconf runs
+        # nscd's try-restart hook inside NetworkManager) must retain the
+        # supervisor's privileges to create directories and notify sockets.
+        t-owned-notify = {
+          wantedBy = [ "multi-user.target" ];
+          serviceConfig = {
+            Type = "notify";
+            NotifyAccess = "all";
+            User = "nobody";
+            RuntimeDirectory = "t-owned-notify";
+            ExecStart = sh "t-owned-notify" ''
+              echo $$ > /run/t-owned-notify/pid
+              systemd-notify --ready
+              exec ${sleep}
+            '';
+          };
+        };
         t-after-notify = {
           wantedBy = [ "multi-user.target" ];
           requires = [ "t-notify.service" ];
@@ -514,6 +531,14 @@
         assert machine.succeed("systemctl show -p MainPID --value t-forking").strip() == read("/run/t-forking.pid")
         machine.succeed("systemctl stop t-forking")
         machine.fail("kill -0 $(cat /run/t-forking.pid)")
+
+    if init == "openrc":
+        with subtest("try-restart from a restricted caller keeps supervisor privileges"):
+            old_pid = read("/run/t-owned-notify/pid")
+            machine.succeed("setpriv --bounding-set=-chown -- systemctl try-restart t-owned-notify.service")
+            machine.succeed("systemctl is-active t-owned-notify.service")
+            assert read("/run/t-owned-notify/pid") != old_pid
+            machine.succeed('test "$(stat -c %U /run/t-owned-notify)" = nobody')
 
     with subtest("conditions"):
         machine.fail("test -e /run/t-cond.ran")
