@@ -31,6 +31,7 @@ in
             --set DISTRO_ID ${lib.escapeShellArg config.system.nixos.distroId} \
             --set INSTALL_BOOTLOADER ${lib.escapeShellArg config.nixithos.bootAssessment.installer} \
             --set PRE_SWITCH_CHECK ${lib.escapeShellArg config.system.preSwitchChecksScript} \
+            --set SNAPSHOT_HOOK ${lib.escapeShellArg config.nixithos.snapshots.hook} \
             ${
               lib.optionalString (
                 config.i18n.glibcLocales != null

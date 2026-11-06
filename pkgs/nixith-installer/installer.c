@@ -87,7 +87,8 @@ static struct {
     int rootsame, autologin, user_edited;
     int desktop, dm, shell, loader, kernel, init, unfree;
     char disk[64], disk_desc[200];
-    int manual, fs, efi;
+    int manual, fs, efi, encrypt;
+    char luks_pw[128], luks_repeat[128];
 } S = { .rootsame = 1, .host = "nixith" };
 
 struct opt {
@@ -2656,6 +2657,34 @@ static const char *disk_desc(int i)
              "Разметить диск самому и смонтировать систему в /mnt (а EFI-раздел в /mnt/boot); для этого откроется консоль.");
 }
 
+static int disk_encryption(void)
+{
+    if (!S.efi) { S.encrypt = 0; return NEXT; }
+    static const struct opt options[] = {
+        { "plain", "None / Без шифрования", "Store the system without disk encryption.", "Хранить систему без шифрования диска." },
+        { "luks", "LUKS2", "Encrypt the system, home and Nix store. Enter a passphrase at each boot; the EFI partition stays unencrypted.",
+          "Зашифровать систему, домашние каталоги и Nix store. Пароль потребуется при загрузке; EFI-раздел остаётся открытым." },
+    };
+    int r = choose(T("Disk encryption", "Шифрование диска"), NULL, options, 2, &S.encrypt);
+    if (r != NEXT || !S.encrypt) return r;
+    struct field fields[] = {
+        { .label = T("Passphrase", "Пароль"), .buf = S.luks_pw, .size = sizeof S.luks_pw, .kind = F_PASS },
+        { .label = T("Repeat it", "Ещё раз"), .buf = S.luks_repeat, .size = sizeof S.luks_repeat, .kind = F_PASS },
+    };
+    int current = 0;
+    const char *error = NULL;
+    for (;;) {
+        r = form_round(T("Unlocking the disk", "Разблокировка диска"),
+            T("Keep this passphrase: without it the encrypted data cannot be recovered.", "Сохраните пароль: без него зашифрованные данные не восстановить."),
+            fields, 2, &current, error, T("Tab: field   Enter: next   Esc: back", "Tab: поле   Enter: далее   Esc: назад"));
+        if (r == BACK || r == QUIT) return r;
+        if (r != NEXT) continue;
+        if (!*S.luks_pw) error = T("Enter a passphrase.", "Введите пароль.");
+        else if (strcmp(S.luks_pw, S.luks_repeat)) error = T("The passphrases differ.", "Пароли не совпадают.");
+        else return NEXT;
+    }
+}
+
 static int step_disk(void)
 {
     busy(T("Looking for disks", "Поиск дисков"));
@@ -2691,8 +2720,8 @@ static int step_disk(void)
                 { "btrfs", "btrfs", "Compression, snapshots and checksums of the data.", "Сжатие, снимки и контрольные суммы данных." },
             };
             r = choose(T("File system", "Файловая система"), NULL, fss, 2, &S.fs);
-            if (r == NEXT)
-                return NEXT;
+            if (r == NEXT) r = disk_encryption();
+            if (r == NEXT) return NEXT;
             continue;
         }
         /* by hand */
@@ -2768,7 +2797,7 @@ static int step_summary(void)
         if (S.manual)
             ROW(T("Disk", "Диск"), "%s", T("mounted on /mnt by hand", "смонтирован в /mnt вручную"));
         else
-            ROW(T("Disk", "Диск"), "%s, %s", S.disk_desc, S.fs ? "btrfs" : "ext4");
+            ROW(T("Disk", "Диск"), "%s, %s%s", S.disk_desc, S.fs ? "btrfs" : "ext4", S.encrypt ? ", LUKS2" : "");
 #undef ROW
         int kw = 0;
         for (int i = 0; i < n; i++)
@@ -2824,6 +2853,7 @@ static void setenv_choices(void)
     setenv("NI_MODE", S.manual ? "manual" : "erase", 1);
     setenv("NI_DISK", S.disk, 1);
     setenv("NI_FS", S.fs ? "btrfs" : "ext4", 1);
+    setenv("NI_ENCRYPT", S.encrypt && !S.manual ? "1" : "0", 1);
     setenv("NI_FIRMWARE", S.efi ? "efi" : "bios", 1);
     setenv("NI_TZ", S.tz, 1);
     setenv("NI_LOCALE", locales[S.locale].id, 1);
@@ -2994,8 +3024,21 @@ static int step_install(void)
     int fd[2];
     if (pipe(fd) < 0)
         return STAY;
+    int secret[2] = { -1, -1 };
+    if (S.encrypt && !S.manual && pipe(secret) < 0) { close(fd[0]); close(fd[1]); return STAY; }
+    if (secret[1] >= 0) {
+        if (dprintf(secret[1], "%s\n", S.luks_pw) < 0) {
+            close(secret[0]); close(secret[1]); close(fd[0]); close(fd[1]); return STAY;
+        }
+        close(secret[1]);
+    }
     pid_t pid = fork();
     if (pid == 0) {
+        if (secret[0] >= 0) {
+            char descriptor[32];
+            snprintf(descriptor, sizeof descriptor, "%d", secret[0]);
+            setenv("NI_LUKS_FD", descriptor, 1);
+        } else unsetenv("NI_LUKS_FD");
         dup2(fd[1], 1);
         dup2(fd[1], 2);
         close(fd[0]);
@@ -3007,7 +3050,11 @@ static int step_install(void)
         execlp("bash", "bash", sh, (char *)NULL);
         _exit(127);
     }
+    if (secret[0] >= 0) {
+        close(secret[0]);
+    }
     close(fd[1]);
+    if (pid < 0) { close(fd[0]); return STAY; }
     fcntl(fd[0], F_SETFL, O_NONBLOCK);
     int stage = 0, done = 0, failed = 0, spin = 0, eof = 0, drawn_final = 0;
     char failmsg[512] = "", part[4096] = "";

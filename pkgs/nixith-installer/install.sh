@@ -4,17 +4,28 @@
 # /etc/nixith/configuration.nix the way the Calamares installer did
 # (../calamares-nixithos/patch-main.py) and runs `nixith install`.
 #
-# Everything comes in the environment (NI_*, see the list below). The
+# Everything comes in the environment (NI_*, see the list below); a disk
+# passphrase comes on a file descriptor (NI_LUKS_FD), never in the
+# environment or a file.  The
 # installer reads the standard output: "::step N TEXT" starts a step,
 # "::done" ends it all, "::fail TEXT" says what went wrong; every other line
 # is the log.
 #
 #   NI_DRY=1 install.sh    the plan and configuration.nix, nothing done
+#
+# Disk layouts (NI_MODE=erase):
+#   ESP (1 GiB, not encrypted) + the system: ext4, or btrfs with the
+#   subvolumes @ (/), @home, @nix, @log (/var/log) and @snapshots
+#   (/.snapshots).  NI_ENCRYPT=1 puts the system in a LUKS2 container
+#   (cryptroot); the boot loader reads its kernel and initrd from the ESP,
+#   so it works with systemd-boot, Limine and GRUB (EFI), not with BIOS.
 set -euo pipefail
 
 : "${NI_MODE:=erase}"        # erase | manual (the user mounted /mnt)
 : "${NI_DISK:=}"             # /dev/sdX: erased, or the BIOS boot disk
-: "${NI_FS:=ext4}"           # ext4 | btrfs
+: "${NI_FS:=ext4}"           # ext4 | btrfs (with subvolumes and snapshots)
+: "${NI_ENCRYPT:=0}"         # 1: LUKS2 around the system partition
+: "${NI_LUKS_FD:=}"          # the file descriptor the passphrase is read from
 : "${NI_FIRMWARE:=efi}"      # efi | bios
 : "${NI_TZ:=UTC}"
 : "${NI_LOCALE:=en_US.UTF-8}"
@@ -58,6 +69,27 @@ case $NI_INIT in
     s6 | dinit | runit | openrc) ;;
     *) fail "NI_INIT: $NI_INIT is not an init system of NixithOS (s6, dinit, runit, openrc)" ;;
 esac
+case $NI_FS in
+    ext4 | btrfs) ;;
+    *) fail "NI_FS: $NI_FS is not a file system the installer makes (ext4, btrfs)" ;;
+esac
+case $NI_MODE in erase | manual) ;; *) fail "invalid NI_MODE: $NI_MODE" ;; esac
+case $NI_ENCRYPT in 0 | 1) ;; *) fail "invalid NI_ENCRYPT: $NI_ENCRYPT" ;; esac
+if [ "$NI_ENCRYPT" = 1 ]; then
+    [ "$NI_MODE" = erase ] || fail "disk encryption is for a disk the installer erases and partitions itself"
+    [ "$NI_FIRMWARE" = efi ] || fail "an encrypted disk needs UEFI: the boot loader reads the kernel and initrd from the EFI system partition (GRUB on BIOS would need an unencrypted /boot)"
+    if [ "$NI_DRY" != 1 ]; then
+        [[ $NI_LUKS_FD =~ ^[0-9]+$ ]] && (( NI_LUKS_FD >= 3 )) || fail "NI_LUKS_FD must be an open descriptor >= 3"
+        [ ! -e /dev/mapper/cryptroot ] || fail "/dev/mapper/cryptroot is already in use; close it manually before erasing another disk"
+        # Validate the key before unmounting or writing anything to the disk.
+        IFS= read -r -u "$NI_LUKS_FD" luks_pass || [ -n "${luks_pass:-}" ] || fail "no passphrase on descriptor $NI_LUKS_FD"
+        eval "exec $NI_LUKS_FD<&-"
+        [ -n "$luks_pass" ] || fail "the passphrase is empty"
+        trap 'unset luks_pass' EXIT
+    fi
+fi
+# the name of the LUKS container in /dev/mapper
+luks_name=cryptroot
 
 # a Nix string
 nix() {
@@ -196,6 +228,21 @@ EOF
   console.font = "ter-v16n";
   console.packages = [ pkgs.terminus_font ];
   console.earlySetup = true;
+
+EOF
+    fi
+    if [ "$NI_FS" = btrfs ] && [ "$NI_MODE" = erase ]; then
+        cat << 'EOF'
+  # btrfs: the subvolumes @ (/), @home, @nix, @log and @snapshots are in
+  # hardware-configuration.nix.  Compression and no access times for all of
+  # them; a read-only snapshot of / and /home before every switch (`nixith
+  # snapshots` lists them, the last ten are kept).
+  fileSystems."/".options = [ "compress=zstd" "noatime" ];
+  fileSystems."/home".options = [ "compress=zstd" "noatime" ];
+  fileSystems."/nix".options = [ "compress=zstd" "noatime" ];
+  fileSystems."/var/log".options = [ "compress=zstd" "noatime" ];
+  fileSystems."/.snapshots".options = [ "compress=zstd" "noatime" ];
+  nixithos.snapshots.enable = true;
 
 EOF
     fi
@@ -360,13 +407,48 @@ if [ "$NI_MODE" = erase ]; then
     if [ "$NI_FIRMWARE" = efi ]; then
         run mkfs.fat -F 32 -n BOOT "$boot"
     fi
+    fsdev=$system
+    if [ "$NI_ENCRYPT" = 1 ]; then
+        # The passphrase is read from its descriptor into a shell variable
+        # (never an argument, an environment variable or a file) and goes to
+        # cryptsetup on its standard input, without a newline.
+        echo "\$ cryptsetup luksFormat --type luks2 $system (the passphrase from descriptor $NI_LUKS_FD)"
+        echo "\$ cryptsetup open $system $luks_name"
+        if [ "$NI_DRY" != 1 ]; then
+            printf %s "$luks_pass" | cryptsetup luksFormat --type luks2 --batch-mode --key-file - "$system" ||
+                fail "cryptsetup luksFormat failed"
+            printf %s "$luks_pass" | cryptsetup open --type luks2 --key-file - "$system" "$luks_name" ||
+                fail "cryptsetup open failed"
+            luks_pass=
+            unset luks_pass
+        fi
+        fsdev=/dev/mapper/$luks_name
+    fi
     if [ "$NI_FS" = btrfs ]; then
-        run mkfs.btrfs -f -L nixith "$system"
+        run mkfs.btrfs -f -L nixith "$fsdev"
     else
-        run mkfs.ext4 -F -L nixith "$system"
+        run mkfs.ext4 -F -L nixith "$fsdev"
     fi
     run udevadm settle
-    run mount "$system" "$root"
+    if [ "$NI_FS" = btrfs ]; then
+        # one subvolume for each thing that is rolled back, kept or backed up
+        # on its own
+        echo "\$ btrfs subvolumes: @ @home @nix @log @snapshots"
+        run mount "$fsdev" "$root"
+        for sv in @ @home @nix @log @snapshots; do
+            run btrfs subvolume create "$root/$sv"
+        done
+        run umount "$root"
+        bopts=compress=zstd,noatime
+        run mount -o "subvol=@,$bopts" "$fsdev" "$root"
+        run mkdir -p "$root/home" "$root/nix" "$root/var/log" "$root/.snapshots"
+        run mount -o "subvol=@home,$bopts" "$fsdev" "$root/home"
+        run mount -o "subvol=@nix,$bopts" "$fsdev" "$root/nix"
+        run mount -o "subvol=@log,$bopts" "$fsdev" "$root/var/log"
+        run mount -o "subvol=@snapshots,$bopts" "$fsdev" "$root/.snapshots"
+    else
+        run mount "$fsdev" "$root"
+    fi
     if [ "$NI_FIRMWARE" = efi ]; then
         run mkdir -p "$root/boot"
         run mount -o umask=0077 "$boot" "$root/boot"

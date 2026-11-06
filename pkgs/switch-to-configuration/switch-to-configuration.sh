@@ -61,6 +61,15 @@ if [[ $action != plan && -z ${NIXOS_NO_CHECK-} && -n ${PRE_SWITCH_CHECK-} ]]; th
   "$PRE_SWITCH_CHECK" "$toplevel" "$action" || exit $?
 fi
 
+# nixithos.snapshots: a read-only snapshot of the system as it is, before it
+# changes.  Not while the system is being installed (the root is /mnt and has
+# nothing yet), and a snapshot that fails is a warning, not a switch that does
+# not happen.
+if [[ ( $action == switch || $action == boot ) && -n ${SNAPSHOT_HOOK-} && -z ${NIXOS_INSTALL_BOOTLOADER-} ]]; then
+  "$SNAPSHOT_HOOK" create "$action" "$toplevel" ||
+    echo "warning: the snapshot before the switch could not be taken" >&2
+fi
+
 if [[ $action == switch || $action == boot ]]; then
   chmod u+w /nix/var/nix/gcroots 2>/dev/null
   if ! "${INSTALL_BOOTLOADER:?}" "$toplevel"; then

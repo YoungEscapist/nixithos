@@ -64,6 +64,8 @@ The running system:
 The rest:
   parts             what the running system was built from, part by part
   generations       the generations of the system
+  snapshots         the btrfs snapshots taken before each switch
+                    (nixithos.snapshots): list, delete ID..., create, prune
   boot-status       the boot assessment: what is on trial, what was rolled
                     back (--ack forgets a rollback)
   install           install the configuration in /mnt (nixos-install; --root DIR)
@@ -512,6 +514,10 @@ case $command in
             exec nixith-boot-assess ack
         fi
         exec nixith-boot-assess status
+        ;;
+    snapshots)
+        command -v nixith-snapshots > /dev/null 2>&1 || die "this system takes no snapshots (nixithos.snapshots.enable, on btrfs)"
+        exec nixith-snapshots "$@"
         ;;
     install) install_system "$@" ;;
     generate-config) generate_config "$@" ;;

@@ -42,6 +42,8 @@ final: prev: {
     switch-to-configuration = self.callPackage ./switch-to-configuration { };
     # puts a new generation on trial until it has booted, goes back if it did not
     bootAssess = self.callPackage ./boot-assess { };
+    # read-only btrfs snapshots before a switch
+    snapshots = self.callPackage ./snapshots { };
     # the installer in the console, and nixith-net
     installer = self.callPackage ./nixith-installer { };
   });

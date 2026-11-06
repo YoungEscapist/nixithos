@@ -116,6 +116,7 @@ let
     ./system/early.nix
     ./system/switch.nix
     ./system/boot-assessment.nix
+    ./system/snapshots.nix
     ./system/channel.nix
     ./system/nixith.nix
     ./system/fstab-units.nix

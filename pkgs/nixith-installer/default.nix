@@ -19,6 +19,7 @@
   dosfstools,
   e2fsprogs,
   btrfs-progs,
+  cryptsetup,
   gnused,
   gnugrep,
   # the kernels the installer offers: only their versions, for the names
@@ -93,6 +94,7 @@ stdenv.mkDerivation {
           dosfstools
           e2fsprogs
           btrfs-progs
+          cryptsetup
           gnused
           gnugrep
         ]

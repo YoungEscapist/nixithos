@@ -199,6 +199,8 @@ in
     user-services = ./tests/user-services.nix;
     sandbox = ./tests/sandbox.nix;
     hardening = ./tests/hardening.nix;
+    snapshots = ./tests/snapshots.nix;
+    installer-disk = ./tests/installer-disk.nix;
     timesync = ./tests/timesync.nix;
     # an installed system: GRUB (BIOS) and Limine (UEFI) start s6 and reboot
     bootloader = ./tests/bootloader.nix;
@@ -210,6 +212,7 @@ in
   // {
     # the same boot and units, with the nodes built from nixpkgs' unmodified
     # module list plus `nixosModules.default`
+    installer-ui = import ./tests/installer-ui.nix { pkgs = hostPkgs; };
     module = runModule ./tests/boot.nix;
     module-units = runModule ./tests/units.nix;
     # s6.systemdPackages = "rebuild": the same boot, with the packages compiled
