@@ -93,6 +93,22 @@ dinit_listing() {
   done < <("$@" list 2>/dev/null)
 }
 
+compat_cleanup() {
+  local uid=$1 registry=/run/user-managers/.compat-cgroups/$1 compat i
+  if [[ -f $registry ]]; then
+    compat=$(< "$registry")
+    if [[ -d $compat && $compat == /sys/fs/cgroup/*/nixith-compat-$uid ]]; then
+      printf '1\n' > "$compat/cgroup.kill" 2>/dev/null || true
+      for i in $(seq 50); do
+        grep -q '^populated 1$' "$compat/cgroup.events" 2>/dev/null || break
+        sleep 0.1
+      done
+      find "$compat" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+    fi
+    [[ -d $compat ]] || rm -f "$registry"
+  fi
+}
+
 start_manager() {
   local uid=$1 dir
   dir=$(manager_dir "$uid")
@@ -131,6 +147,7 @@ stop_manager() {
     sleep 0.1
   done
   rm -rf "$gone"
+  compat_cleanup "$uid"
   # the manager's own files go with it, and its control group (see cmd_run)
   rm -rf "${STATES:?}/${uid:?}"
   rmdir "/sys/fs/cgroup/user.slice/user-$uid.slice/user@$uid.service" \
@@ -359,14 +376,35 @@ cmd_run() {
   # none to open.
   local pam=()
   [[ -e /etc/pam.d/systemd-user ]] && pam=(unit-pam -s systemd-user -u "$name" --)
-  # setpriv and a clean environment: from here on this is the user's
-  exec ${pam[@]+"${pam[@]}"} setpriv --reuid "$uid" --regid "$gid" --init-groups \
-    env -i \
-      HOME="$home" USER="$name" LOGNAME="$name" SHELL="$shell" \
+  local compat=
+  compat_cleanup "$uid"
+  if [[ -e /etc/units/systemd-compat && -d $cg ]]; then
+    compat=$cg/nixith-compat-$uid
+    if mkdir -p "$compat/manager" &&
+        chown "$uid:$gid" "$compat" "$compat/cgroup.procs" "$compat/cgroup.subtree_control" "$compat/manager" "$compat/manager/cgroup.procs"; then
+      install -d -m 0700 /run/user-managers/.compat-cgroups
+      printf '%s\n' "$compat" > "/run/user-managers/.compat-cgroups/$uid"
+    else
+      log "cannot delegate cgroup for user $uid"
+      compat=
+    fi
+  fi
+  # PAM's root monitor stays outside the delegated subtree. Only its child
+  # enters it, immediately before dropping privileges.
+  exec ${pam[@]+"${pam[@]}"} "$SELF" exec-user "$uid" "$compat"
+}
+
+cmd_exec_user() {
+  local uid=$1 compat=${2-} name gid home shell
+  lookup "$uid" || exit 1
+  if [[ -n $compat ]]; then
+    printf '%s\n' "$$" > "$compat/manager/cgroup.procs" || exit 1
+  fi
+  exec setpriv --reuid "$uid" --regid "$gid" --init-groups \
+    env -i HOME="$home" USER="$name" LOGNAME="$name" SHELL="$shell" \
       XDG_RUNTIME_DIR="/run/user/$uid" UNIT_SCOPE=user \
-      UNIT_USER_STATE="$STATES/$uid" \
-      PATH="$DEFAULT_PATH" \
-      "$SELF" session "$uid"
+      UNIT_USER_STATE="$STATES/$uid" SYSTEMD1_CGROUP_ROOT="$compat" \
+      PATH="$DEFAULT_PATH" "$SELF" session "$uid"
 }
 
 # --------------------------------------------------------------------------
@@ -663,6 +701,7 @@ case ${1-} in
   supervise) cmd_supervise ;;
   start) start_manager "${2:?uid}" ;;
   stop) stop_manager "${2:?uid}" ;;
+  exec-user) cmd_exec_user "${2:?uid}" "${3-}" ;;
   run) cmd_run "${2:?uid}" ;;
   session) cmd_session "${2:?uid}" ;;
   *)

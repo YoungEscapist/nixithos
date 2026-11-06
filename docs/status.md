@@ -107,7 +107,7 @@ is separate from the normal suite.
 | tests of `systemd.network.*` (rkvm) | there is no systemd-networkd |
 | `system.etc.overlay` (userborn-static) | requires `boot.initrd.systemd` |
 | `containers.*` containers (rstp, ndppd) | nspawn |
-| programs that talk to systemd itself over D-Bus (`org.freedesktop.systemd1`: transient units, scopes with cgroup delegation; benchexec through pystemd) | the systemd manager's API; on a GNOME session bus part of it is there: `GetUnit`, `Start/Stop/RestartUnit`, `ResetFailed`, the environment ([systemd1-bus](../pkgs/systemd-shim/systemd1-bus.py)), which is enough for gnome-session 50 |
+| the system-bus systemd manager API (including system-wide transient services and controller delegation) | not implemented; the optional user-session adapter supports a tested subset of transient services/scopes, native unit operations, jobs and signals; see [user-session compatibility](systemd-compat.md) |
 | tests of systemd features: pstore, coredump, sysusers, repart | that is not init |
 
 ## Not done

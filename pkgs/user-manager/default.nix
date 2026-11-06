@@ -9,6 +9,7 @@
   getent,
   gnugrep,
   diffutils,
+  findutils,
   s6,
   s6-rc,
   dinit,
@@ -30,6 +31,7 @@ replaceVarsWith {
       gnugrep
       # (cmp, for a switch of dinit --user)
       diffutils
+      findutils
       s6
       s6-rc
       # (unit-pam)

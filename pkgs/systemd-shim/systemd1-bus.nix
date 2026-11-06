@@ -19,6 +19,7 @@ runCommand "systemd1-bus"
   }
   ''
     install -Dm755 ${./systemd1-bus.py} $out/libexec/systemd1-bus.py
+    install -Dm644 ${./transient.py} $out/libexec/transient.py
     patchShebangs $out/libexec
     makeWrapper ${python}/bin/python3 $out/bin/systemd1-bus \
       --add-flags $out/libexec/systemd1-bus.py \

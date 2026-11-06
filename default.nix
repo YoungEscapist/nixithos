@@ -200,6 +200,7 @@ in
     sandbox = ./tests/sandbox.nix;
     hardening = ./tests/hardening.nix;
     snapshots = ./tests/snapshots.nix;
+    systemd-compat = ./tests/systemd-compat.nix;
     installer-disk = ./tests/installer-disk.nix;
     timesync = ./tests/timesync.nix;
     # an installed system: GRUB (BIOS) and Limine (UEFI) start s6 and reboot
@@ -212,6 +213,7 @@ in
   // {
     # the same boot and units, with the nodes built from nixpkgs' unmodified
     # module list plus `nixosModules.default`
+    systemd-compat-elogind = runTest { imports = [ ./tests/user-services.nix ]; defaults.nixithos.compat.systemd.enable = true; };
     installer-ui = import ./tests/installer-ui.nix { pkgs = hostPkgs; };
     module = runModule ./tests/boot.nix;
     module-units = runModule ./tests/units.nix;
@@ -224,6 +226,7 @@ in
   #
   #   nix-build -A dinit.boot
   dinit = lib.mapAttrs (_: runDinit) {
+    systemd-compat = ./tests/systemd-compat.nix;
     boot = ./tests/boot.nix;
     units = ./tests/units.nix;
     switch = ./tests/switch.nix;

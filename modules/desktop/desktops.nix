@@ -342,22 +342,8 @@ in
       # (the session alone and its settings; the apps of GNOME are many, and
       # the image carries every desktop at once)
       services.gnome.core-apps.enable = lib.mkOverride 900 false;
-      # gnome-session (49 and later) starts GNOME by asking the user's
-      # service manager over D-Bus, not through systemctl: it gets that
-      # D-Bus face of the s6 user manager, up before the session is
-      systemd.user.services.systemd1-bus = {
-        description = "org.freedesktop.systemd1 on the session bus";
-        wantedBy = [ "default.target" ];
-        requires = [ "dbus.service" ];
-        after = [ "dbus.service" ];
-        environment.SYSTEMD1_BUS_SYSTEMCTL = "${config.systemd.package}/bin/systemctl";
-        serviceConfig = {
-          Type = "dbus";
-          BusName = "org.freedesktop.systemd1";
-          ExecStart = lib.getExe (pkgs.callPackage ../../pkgs/systemd-shim/systemd1-bus.nix { });
-          Restart = "on-failure";
-        };
-      };
+      # gnome-session talks to the user manager through org.freedesktop.systemd1.
+      nixithos.compat.systemd.enable = lib.mkDefault true;
       environment.systemPackages = with pkgs; [
         nautilus
         gnome-console

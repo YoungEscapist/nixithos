@@ -106,7 +106,7 @@ timesync. Дополнительные тесты проверяют подкл�
 | тесты на `systemd.network.*` (rkvm) | нет systemd-networkd |
 | `system.etc.overlay` (userborn-static) | требует `boot.initrd.systemd` |
 | контейнеры `containers.*` (rstp, ndppd) | nspawn |
-| программы, которые говорят с самим systemd по D-Bus (`org.freedesktop.systemd1`: временные юниты, scope с делегированием cgroup — benchexec через pystemd) | API менеджера systemd; на шине сеанса с GNOME есть его часть — `GetUnit`, `Start/Stop/RestartUnit`, `ResetFailed`, окружение ([systemd1-bus](../../pkgs/systemd-shim/systemd1-bus.py)), этого хватает gnome-session 50 |
+| API системного менеджера systemd на системной D-Bus шине | пока не реализован; пользовательский адаптер поддерживает проверяемое подмножество временных служб/scopes, native units, jobs и сигналов: [совместимость](systemd-compat.md) |
 | тесты функций systemd: pstore, coredump, sysusers, repart | это не init |
 
 ## Не сделано

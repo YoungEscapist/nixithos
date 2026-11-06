@@ -128,6 +128,7 @@ let
     ./services/dbus.nix
     ./services/getty.nix
     ./services/elogind.nix
+    ./services/systemd-compat.nix
     ./services/user-manager.nix
     ./services/logging.nix
     ./services/timesyncd.nix
