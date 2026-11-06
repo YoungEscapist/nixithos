@@ -21,6 +21,7 @@ Run the initial integration test with:
 
 ```sh
 nix-build -A finit.smoke
+nix-build -A finit.control
 ```
 
 The test boots a real VM, checks the executable of PID 1, the default target,
@@ -32,13 +33,27 @@ including native PID 1, D-Bus, a compiled NixOS service, `running` state and
 normal VM poweroff. This establishes a bootable prototype; it does not yet
 establish compatibility with the full unit test matrix.
 
+The control adapter waits for stop completion and for Finit's native ready
+condition on start. Synchronous restart is stop/wait/start/wait; `--no-wait`
+keeps the native asynchronous request. Each wait is bounded at 90 seconds.
+`finitctl list` parses the status snapshot in one jq process. The control VM
+checks delayed ExecStop, notify readiness, PID replacement, asynchronous stop,
+complete status enumeration and unknown-unit errors.
+
+`systemctl try-restart` retains the existing supervisor and requests a process
+restart through it. This keeps the native ready condition asserted: dropping
+it while boot ordering tasks run can terminate those tasks and leave the boot
+graph waiting indefinitely (observed with resolvconf's nscd restart hook).
+The control test checks both a changed main PID and an unchanged supervisor PID.
+
 Before this backend can be offered by the installer:
 
 - Separate ordering, hard requirements and optional dependencies in Finit
   conditions. The initial graph conservatively waits for readiness/success;
   failed optional dependencies can currently hold back unrelated startup.
-- Implement and test the full synchronous start/stop/restart contract,
-  oneshot stop commands, readiness timeouts and restart limits.
+- Extend the tested long-running service controls to oneshot stop commands,
+  failure propagation, per-unit readiness timeouts and restart limits. The
+  adapter's fixed 90-second wait is an initial bound, not per-unit policy.
 - Implement live configuration reconciliation and test unchanged PIDs,
   changed services, removal, rollback and transaction locks. Live activation
   on a running Finit system currently rejects `switch`/`test`; use boot-only

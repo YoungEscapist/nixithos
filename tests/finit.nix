@@ -12,7 +12,12 @@
   };
   testScript = ''
     machine.start()
-    machine.wait_for_unit("multi-user.target")
+    try:
+        machine.wait_until_succeeds("systemctl is-active multi-user.target", timeout=45)
+    except Exception:
+        print(machine.succeed("initctl -j status"))
+        print(machine.succeed("ps axf"))
+        raise
     pid1 = machine.succeed("readlink /proc/1/exe").strip()
     assert pid1.endswith("-finit-4.17/bin/finit"), pid1
     machine.succeed("test -S /run/dbus/system_bus_socket")
