@@ -172,6 +172,16 @@
           };
         };
 
+        t-exec-condition = {
+          wantedBy = [ "multi-user.target" ];
+          serviceConfig = {
+            ExecCondition = "${pkgs.coreutils}/bin/false";
+            ExecStart = sh "t-exec-condition" ''
+              touch /run/t-exec-condition.ran
+              exec ${sleep}
+            '';
+          };
+        };
         t-cond = {
           wantedBy = [ "multi-user.target" ];
           unitConfig.ConditionPathExists = "/does/not/exist";
@@ -541,6 +551,10 @@
             machine.succeed('test "$(stat -c %U /run/t-owned-notify)" = nobody')
 
     with subtest("conditions"):
+        machine.succeed("systemctl start t-exec-condition")
+        machine.fail("systemctl is-active t-exec-condition")
+        machine.fail("systemctl is-failed t-exec-condition")
+        machine.fail("test -e /run/t-exec-condition.ran")
         machine.fail("test -e /run/t-cond.ran")
         machine.fail("systemctl is-failed t-cond")
 

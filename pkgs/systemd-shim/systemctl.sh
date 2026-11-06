@@ -568,6 +568,11 @@ dinit_start() {
       [[ $sv_phase == idle ]] && break
     done
     unit_state "$u"
+    # A rejected Condition/ExecCondition is a successful skipped start.
+    # It remains inactive, including when default.target is reconciled.
+    if [[ $active_state == inactive && -r $STATE/$u/result && $(< "$STATE/$u/result") == condition ]]; then
+      return 0
+    fi
     [[ $active_state == active || $active_state == activating ]]
     return
   fi
