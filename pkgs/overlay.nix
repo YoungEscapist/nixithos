@@ -58,14 +58,14 @@ final: prev: {
     '';
   });
 
-  # kpmcore (KDE Partition Manager's and Calamares's backend) runs lsblk,
+  # kpmcore (KDE Partition Manager's backend) runs lsblk,
   # sfdisk, … only out of its list of trusted prefixes, the store paths of
   # util-linux and the others, compiled in as UTF-16 strings.  Nix sees no
   # reference in those, so the packages need not be in the system at all, and
   # the dependency replacement (no-systemd.nix, mode "replace") does not
   # rewrite them: util-linux, cryptsetup, lvm2 are replaced (they link
   # libsystemd), and kpmcore went on looking for the originals - it found no
-  # disk, and Calamares had nothing to install on.  So the system's profile
+  # disk. So the system's profile
   # is one of the prefixes as well.
   kdePackages = prev.kdePackages.overrideScope (
     kfinal: kprev: {

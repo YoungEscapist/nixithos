@@ -405,7 +405,6 @@ The mark also exists as pictures (`nixithos.branding.artwork`): the
 
 ```console
 $ nix-build -A iso                  # result/iso/nixithos-26.05…-x86_64-linux.iso (1.8 GB)
-$ nix-build -A isoGraphical         # …-graphical-…: LXQt and Calamares (2.8 GB)
 ```
 
 The main image ([images/iso.nix](images/iso.nix)), the one in the releases,
@@ -416,26 +415,30 @@ logged in on tty1 and **nixith-installer** starts by itself
 ([pkgs/nixith-installer](pkgs/nixith-installer)).
 
 nixith-installer is a small C program over ncurses (about 100 KB) that
-speaks English or Russian. Its steps are those of the Calamares installer
-below, with the same screenshots next to every choice and the same slides
+speaks English or Russian. It shows screenshots next to each choice and slides
 during the installation (on the Linux console they are drawn straight to the
-framebuffer), and with a network step in front: a simpler nmtui on top of
+framebuffer). It begins with a network step: a simpler nmtui on top of
 `nmcli`. A cable connects by itself; a network is a form, not just a
 password: WPA2, WPA3, WEP or 802.1X with a login, hidden networks, a cable
 with the address, DNS and MAC by hand, DSL / PPPoE. The connection made there
 is copied into the installed system. `nixith-net` starts that step alone, on
-any system. One step Calamares did not have is the kernel: the long-term one
+any system. The kernel step offers the long-term one
 NixOS uses by default (it is on the image), the newest, the older long-term
 6.12 or 6.6, Zen or XanMod (`boot.kernelPackages`; all of them come from the
 NixOS cache). After it comes the init system: s6, dinit, runit or OpenRC
 (`nixithos.init`). Nothing is written until the summary is confirmed; then [install.sh](pkgs/nixith-installer/install.sh)
 partitions the disk (GPT: a 1 GiB EFI partition, or a BIOS boot partition,
 and ext4 or btrfs for the rest) or takes what is mounted on `/mnt`, writes
-`/etc/nixith/configuration.nix` the way Calamares did, with the passwords as
+`/etc/nixith/configuration.nix`, with the passwords as
 yescrypt hashes, and runs `nixith install`, retrying when a download breaks
 off. Parallax is carried on the image, so installing it is not compiling it.
 Checked in QEMU end to end (UEFI, Parallax, ly): the installation, booting
 the installed system, logging in with the password given in the installer.
+
+UEFI installations can encrypt ext4 or btrfs with LUKS2. Btrfs uses separate
+subvolumes and optional snapshots before switching configurations; see
+[encrypted disks and snapshots](docs/installer-disk.md). The TUI is the only
+installer; Calamares and its graphical ISO have been removed.
 
 By hand, without the installer:
 
@@ -448,13 +451,6 @@ By hand, without the installer:
 ([lib/nixith.nix](lib/nixith.nix)), so the installed system can do
 `nixith switch --only …` from its first generation. Checked in QEMU: GPT
 partitioning, systemd-boot, booting the installed system.
-
-The graphical one is [images/iso-graphical.nix](images/iso-graphical.nix): a
-live system with LXQt on labwc on tty1 (automatic login as `nixith` without a
-password, [modules/desktop/lxqt.nix](modules/desktop/lxqt.nix)), and with it
-the graphical installer opens: Calamares with the NixithOS mark and slides
-([pkgs/calamares-nixithos](pkgs/calamares-nixithos)). Once closed, the
-installer starts again from the menu (System → "Install NixithOS").
 
 The installer's steps: language and time zone, keyboard layout, user, then
 what the system will have:
@@ -481,9 +477,9 @@ shells in a terminal, ly/greetd/console, boot loader menus. They were taken
 in QEMU (desktops and shells from a configuration like `configs.desktops`,
 menus by a test like `tests/bootloader.nix` with a long menu timeout); niri
 as a nested window filling the screen, since it does not draw by itself with
-software rendering. While the installation runs, 17 tips go by (`show.qml`:
-`nixith`, generations, services and logs, packages, desktops, shells); a
-click or the arrow keys show the next one.
+software rendering. While the installation runs, 17 tips go by (in `installer.c`:
+`nixith`, generations, services and logs, packages, desktops, shells);
+the arrow keys show the next one.
 
 The desktops were checked as a whole in QEMU
 (`nix-build -A configs.desktops.vm`, login `yarik`/`yarik`): ly on tty1;

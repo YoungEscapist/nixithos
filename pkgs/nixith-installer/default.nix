@@ -74,7 +74,7 @@ stdenv.mkDerivation {
     runHook preInstall
     install -Dm755 nixith-installer $out/bin/nixith-installer
     install -Dm755 install.sh $out/libexec/nixith-installer/install.sh
-    # the screenshots Calamares showed (each desktop, login screen, shell and
+    # screenshots of each desktop, login screen, shell and
     # boot loader, taken in QEMU): on black at 16:10, as it had them
     mkdir -p $out/share/nixith-installer/screenshots
     for shot in ${../../branding/screenshots}/*.png; do

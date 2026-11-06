@@ -1,7 +1,7 @@
 # A light desktop with floating windows: LXQt on labwc (a stacking Wayland
 # compositor in the manner of Openbox), with its panel, menu, file manager
-# and settings.  What the graphical image boots into: Calamares is a Qt
-# program too, so LXQt costs the image little beyond what it already has.
+# and settings. Available as an installed desktop; the installation image
+# uses the console installer.
 #
 #   nixithos.desktop.lxqt.enable = true;
 #

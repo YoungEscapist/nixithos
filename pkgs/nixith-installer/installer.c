@@ -1,15 +1,14 @@
 /*
  * nixith-installer: the installer of NixithOS, in the console.
  *
- * A wizard over ncurses: the steps of the old Calamares installer (time
+ * A wizard over ncurses: time
  * zone, language, keyboard, user, desktop, login, shell, boot loader,
- * unfree software, disk), the kernel and the init system, with a network
+ * unfree software, disk, the kernel and the init system, with a network
  * step in front of
  * them that does what nmtui does, only simpler: the wired network by
  * itself, a list of Wi-Fi networks, and a form for a connection that needs
  * more than a password (802.1X, a hidden network, PPPoE, an address by
- * hand).  Like
- * Calamares, it shows a screenshot of each desktop, login screen, shell and
+ * hand). It shows a screenshot of each desktop, login screen, shell and
  * boot loader, and slides while it installs.  Nothing touches the disk until
  * the summary is confirmed; then ./install.sh does the work (partitioning,
  * the configuration, `nixith install`) and its output is shown as it goes.
@@ -371,7 +370,7 @@ static int wrapped_lines(int w, const char *text)
 /* --- pictures --------------------------------------------------------------- */
 
 /*
- * The screenshots of NixithOS that Calamares showed (../../branding/
+ * Screenshots of NixithOS (../../branding/
  * screenshots, as JPEG files at 16:10 on black): one for each choice of a
  * desktop, a login screen, a shell and a boot loader, and some in the slides
  * while the system installs.
@@ -2466,7 +2465,7 @@ static const char *opt_desc(int i)
     return ru ? desc_table[i].ru : desc_table[i].en;
 }
 
-/* the screenshot of a choice, as Calamares had them (default.nix makes them
+/* the screenshot of a choice (default.nix makes them
  * of ../../branding/screenshots) */
 static const char *opt_pic(int i)
 {
@@ -2901,8 +2900,7 @@ static void log_add(const char *l)
     loglines[nlog++] = strdup(l);
 }
 
-/* the slides while it installs: those of Calamares (../calamares-nixithos/
- * show.qml), a tip each about what the installed system has, some with a
+/* Installation slides: a tip about what the installed system has, some with a
  * screenshot; [0] English, [1] Russian */
 static const struct tip {
     const char *kicker[2], *title[2], *body[2], *cmd, *img;
@@ -3094,7 +3092,7 @@ static int step_install(void)
             }
         }
         /* the keys: the slides back and forth, the whole log; a slide goes
-         * on by itself after 11 seconds, as in Calamares */
+         * on by itself after 11 seconds */
         wint_t c;
         int kr;
         while ((kr = get_wch(&c)) != ERR) {

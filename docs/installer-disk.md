@@ -14,8 +14,8 @@ encrypted installation; the installer does not close it automatically.
 
 Both ext4 and btrfs can be encrypted. Automatic encrypted BIOS layouts are not
 supported. Manual partitioning keeps its existing workflow and hardware scan.
-These additions currently apply to the console installer; the graphical
-installer's encryption and subvolume workflow has not been validated here.
+The console TUI is the project's installer. Calamares and its graphical image
+have been retired.
 
 When automatically formatting btrfs the installer creates:
 

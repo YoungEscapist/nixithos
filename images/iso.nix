@@ -13,7 +13,6 @@
   imports = [
     "${modulesPath}/installer/cd-dvd/installation-cd-minimal.nix"
     {
-      # (./iso-graphical.nix starts Calamares instead)
       options.nixithos.liveInstaller = lib.mkEnableOption "the console installer on tty1" // {
         default = true;
       };

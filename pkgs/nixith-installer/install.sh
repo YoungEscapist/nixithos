@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # The installation itself, for nixith-installer (./installer.c): partitions
 # and formats the disk (or takes what is mounted on /mnt), writes
-# /etc/nixith/configuration.nix the way the Calamares installer did
-# (../calamares-nixithos/patch-main.py) and runs `nixith install`.
+# /etc/nixith/configuration.nix and runs `nixith install`.
 #
 # Everything comes in the environment (NI_*, see the list below); a disk
 # passphrase comes on a file descriptor (NI_LUKS_FD), never in the

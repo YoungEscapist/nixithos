@@ -291,8 +291,6 @@ in
 
   # the installation/live ISO (images/iso.nix)
   iso = (eval { modules = [ ./images/iso.nix ]; }).config.system.build.isoImage;
-  # …and with the desktops and the graphical installer (images/iso-graphical.nix)
-  isoGraphical = (eval { modules = [ ./images/iso-graphical.nix ]; }).config.system.build.isoImage;
 
   configs = lib.mapAttrs (_: sample) {
     minimal = ./tests/configs/minimal.nix;
