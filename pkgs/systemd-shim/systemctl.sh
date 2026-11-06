@@ -880,7 +880,9 @@ do_restart() {
       dinit_start "$unit" || rc=1
       continue
     fi
-    if (( OPENRC && only_if_active )) && is_longrun "$unit" && sv_status "${I_ATOM[$unit]}"; then
+    if (( (OPENRC || FINIT) && only_if_active )) && is_longrun "$unit" && sv_status "${I_ATOM[$unit]}"; then
+      # Finit ready conditions must stay asserted across try-restart so
+      # in-flight ordering tasks are not killed when readiness disappears.
       # rc-service starts children in its caller's security context. A
       # resolvconf hook inside NetworkManager cannot grant nscd CAP_CHOWN
       # again. Keep the existing supervisor, which was started by init,

@@ -254,7 +254,7 @@ in
   # ... and with OpenRC (nixithos.init = "openrc"):
   #
   #   nix-build -A openrc.boot
-  finit = lib.mapAttrs (_: runFinit) { smoke = ./tests/finit.nix; };
+  finit = lib.mapAttrs (_: runFinit) { smoke = ./tests/finit.nix; control = ./tests/finit-control.nix; };
 
   openrc = lib.mapAttrs (_: runOpenrc) {
     boot = ./tests/boot.nix;
