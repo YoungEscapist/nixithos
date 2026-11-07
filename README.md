@@ -5,7 +5,7 @@
 <p align="center"><img src="branding/nixithos.png" alt="NixithOS" width="420"></p>
 
 NixOS without systemd: choose s6, dinit, runit or OpenRC as the init system
-and service manager. Devices are managed by `eudev`, logs by `s6-log`.
+and service manager; experimental Finit is available for testing. Devices are managed by `eudev`, logs by `s6-log`.
 The default is `s6-linux-init` with `s6-rc`.
 
 This is not a rewritten distribution but a layer on top of ordinary nixpkgs
@@ -151,6 +151,14 @@ $ openrcctl list | head -3
 [{+}     ] default
 [{+}     ] dbus
 ```
+
+### Finit (experimental)
+
+`nixithos.init = "finit";` runs Finit 4.17 as PID 1. NixOS service definitions
+are translated into Finit tasks and supervised services. Boot, shutdown and
+basic service controls are tested. Live configuration switching is not
+implemented, and optional dependency failure semantics are not fully validated;
+this choice is intended for testing. See [docs/finit.md](docs/finit.md).
 
 ## What replaces what
 
@@ -425,7 +433,7 @@ is copied into the installed system. `nixith-net` starts that step alone, on
 any system. The kernel step offers the long-term one
 NixOS uses by default (it is on the image), the newest, the older long-term
 6.12 or 6.6, Zen or XanMod (`boot.kernelPackages`; all of them come from the
-NixOS cache). After it comes the init system: s6, dinit, runit or OpenRC
+NixOS cache). After it comes the init system: s6, dinit, runit, OpenRC or Finit (experimental)
 (`nixithos.init`). Nothing is written until the summary is confirmed; then [install.sh](pkgs/nixith-installer/install.sh)
 partitions the disk (GPT: a 1 GiB EFI partition, or a BIOS boot partition,
 and ext4 or btrfs for the rest) or takes what is mounted on `/mnt`, writes

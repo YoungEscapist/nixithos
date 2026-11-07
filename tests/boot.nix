@@ -1,5 +1,4 @@
-# The system boots on s6 (or dinit, as dinit.boot, runit, as runit.boot, or OpenRC, as openrc.boot), reaches its default
-# target with nothing failed, and shuts down cleanly.
+# The system boots on each init backend, reaches its default target and shuts down cleanly.
 {
   name = "boot";
 
@@ -45,6 +44,11 @@
             print(machine.succeed("openrcctl list"))
             print(machine.succeed("rc-status -a"))
             machine.succeed("readlink -f $(command -v poweroff) | grep -q systemctl")
+        elif init == "finit":
+            machine.succeed("readlink /proc/1/exe | grep -q -- '-finit-4.17/bin/finit$'")
+            machine.succeed("test -s /run/units/.db/finit-names.tsv")
+            machine.succeed("initctl -j status | grep -q 'multi-user.target'")
+            print(machine.succeed("initctl -j status"))
         elif init == "dinit":
             machine.succeed("grep -qx dinit /proc/1/comm")
             # the services are read from the database of this configuration

@@ -1,8 +1,8 @@
 # Experimental Finit backend
 
-Work starts from NixithOS main c3491f4. This branch adds `nixithos.init = "finit"`
-with Finit 4.17 as PID 1 and its native service manager. It is not yet an
-installer choice or part of the published ISO.
+Finit 4.17 is available as an **experimental** `nixithos.init = "finit"` choice
+in the console installer and ISO. It runs as PID 1 with its native service
+manager. The stable init systems remain the recommended choices.
 
 The first stage packages the released upstream tarball, generates native
 Finit tasks and services from the existing unit compiler, and runs them through
@@ -28,10 +28,11 @@ The test boots a real VM, checks the executable of PID 1, the default target,
 D-Bus and an ordinary service, waits for the boot marker to clear, checks the
 reported system state, and powers the VM off through `systemctl`.
 
-Initial validation on 2026-11-05: `finit.smoke` passed (36.32 seconds),
+Validation on 2026-11-07: `finit.smoke` passed (36.32 seconds),
 including native PID 1, D-Bus, a compiled NixOS service, `running` state and
-normal VM poweroff. This establishes a bootable prototype; it does not yet
-establish compatibility with the full unit test matrix.
+normal VM poweroff. `finit.boot` also passed its real-VM boot, service-control
+and Nix-daemon socket-activation checks. Full unit semantics, installation and
+desktop-login compatibility are still under validation.
 
 The control adapter waits for stop completion and for Finit's native ready
 condition on start. Synchronous restart is stop/wait/start/wait; `--no-wait`
@@ -46,7 +47,7 @@ it while boot ordering tasks run can terminate those tasks and leave the boot
 graph waiting indefinitely (observed with resolvconf's nscd restart hook).
 The control test checks both a changed main PID and an unchanged supervisor PID.
 
-Before this backend can be offered by the installer:
+Remaining work before recommending this backend for general use:
 
 - Separate ordering, hard requirements and optional dependencies in Finit
   conditions. The initial graph conservatively waits for readiness/success;
@@ -59,9 +60,9 @@ Before this backend can be offered by the installer:
   on a running Finit system currently rejects `switch`/`test`; use boot-only
   generations during development.
 - Run unit semantics, login, user services, sandbox, hardening, timesync and
-  bootloader/rollback tests, then an actual installation and desktop login.
-- Add TUI/Calamares choices only once those checks establish the supported
-  behaviour.
+  bootloader/rollback tests, then installation and desktop-login scenarios.
+  Finit is exposed in the TUI only as an experimental option while these checks
+  and live configuration reconciliation remain incomplete.
 
 Upstream references for the pinned release:
 

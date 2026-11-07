@@ -199,6 +199,23 @@ warn() { printf '%s: warning: %s\n' "$U_UNIT" "$*" >&2; }
 # --------------------------------------------------------------------------
 # the supervisor of a longrun: s6-supervise, or unit-supervise under dinit
 
+# Finit supervises these same atoms directly. The runtime still needs their
+# liveness (notably for socket activation), but there is no unit-supervise
+# state file to read. Resolve unitc's stable native name and query Finit IPC.
+finit_native() {
+  local atom native
+  while IFS=$'\t' read -r atom native; do
+    [[ $atom == "$1" ]] && { printf '%s' "$native"; return 0; }
+  done < /run/units/.db/finit-names.tsv
+  return 1
+}
+
+finit_status() {
+  local native
+  native=$(finit_native "$1") || return 1
+  initctl -j status "$native" 2>/dev/null
+}
+
 # sv_status ATOM: what unit-supervise says about it, in sv_up, sv_ready,
 # sv_pid and sv_svpid; 1 if no supervisor is there for it
 sv_status() {
@@ -216,7 +233,9 @@ sv_status() {
 
 # Is the process of ATOM running?
 rt_up() {
-  if [[ $RT_INIT == dinit ]]; then
+  if [[ -r /run/units/.db/finit-names.tsv ]]; then
+    [[ $(finit_status "$1" | jq -r '.status' 2>/dev/null) == running ]]
+  elif [[ $RT_INIT == dinit ]]; then
     sv_status "$1" && (( sv_up ))
   else
     [[ $(s6-svstat -o up "$RT_SCANDIR/$1" 2>/dev/null) == true ]]
@@ -225,7 +244,9 @@ rt_up() {
 
 # The process of ATOM, or nothing
 rt_pid() {
-  if [[ $RT_INIT == dinit ]]; then
+  if [[ -r /run/units/.db/finit-names.tsv ]]; then
+    finit_status "$1" | jq -r 'select(.status == "running") | .pid // empty' 2>/dev/null
+  elif [[ $RT_INIT == dinit ]]; then
     sv_status "$1" && printf '%s' "$sv_pid"
   else
     s6-svstat -o pid "$RT_SCANDIR/$1" 2>/dev/null

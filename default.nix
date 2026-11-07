@@ -81,9 +81,10 @@ let
   runRunit = runnerFor "replace" { init = "runit"; };
 
   # ... and on the fourth (OpenRC)
-  runFinit = runnerFor "replace" { init = "finit"; };
-
   runOpenrc = runnerFor "replace" { init = "openrc"; };
+
+  # ... and on experimental Finit
+  runFinit = runnerFor "replace" { init = "finit"; };
 
   # nixpkgs with `nixos/lib/testing-python.nix` replaced.  Every test of
   # nixos/tests/all-tests.nix goes through it: `runTest` there is its
@@ -225,6 +226,13 @@ in
   # The same tests with dinit as init (nixithos.init = "dinit"):
   #
   #   nix-build -A dinit.boot
+  finit = lib.mapAttrs (_: runFinit) {
+    smoke = ./tests/finit.nix;
+    control = ./tests/finit-control.nix;
+    boot = ./tests/boot.nix;
+    units = ./tests/units.nix;
+  };
+
   dinit = lib.mapAttrs (_: runDinit) {
     boot = ./tests/boot.nix;
     units = ./tests/units.nix;
@@ -257,8 +265,6 @@ in
   # ... and with OpenRC (nixithos.init = "openrc"):
   #
   #   nix-build -A openrc.boot
-  finit = lib.mapAttrs (_: runFinit) { smoke = ./tests/finit.nix; control = ./tests/finit-control.nix; };
-
   openrc = lib.mapAttrs (_: runOpenrc) {
     boot = ./tests/boot.nix;
     units = ./tests/units.nix;

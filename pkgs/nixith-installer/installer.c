@@ -203,6 +203,9 @@ static const struct opt inits[] = {
     { "openrc", "OpenRC",
       "OpenRC as PID 1 and service manager, with parallel startup ordered by dependencies. The same NixOS units, systemctl and logs; user services run on s6.",
       "OpenRC как PID 1 и менеджер служб, с параллельным запуском по зависимостям. Те же юниты NixOS, systemctl и журналы; пользовательские службы работают на s6." },
+    { "finit", "Finit (experimental)",
+      "Finit 4.17 as PID 1 and service manager. It boots the compiled NixOS services; live configuration switching is not implemented yet. Choose it only for testing.",
+      "Finit 4.17 как PID 1 и менеджер служб. Запускает собранные службы NixOS; переключение конфигурации в работающей системе пока не реализовано. Выбирайте только для проверки." },
 };
 #define NINITS (int)(sizeof inits / sizeof *inits)
 
@@ -1184,8 +1187,8 @@ static int step_welcome(void)
     int sel = ru;
     struct menu m = {
         .title = T("Welcome to NixithOS", "Добро пожаловать в NixithOS"),
-        .intro = T("NixOS without systemd: the same packages and configuration, with s6, dinit, runit or OpenRC running the system. Choose the language of the installer.",
-                   "NixOS без systemd: те же пакеты и конфигурация, а систему запускает s6, dinit, runit или OpenRC. Выберите язык установщика."),
+        .intro = T("NixOS without systemd: the same packages and configuration, with s6, dinit, runit, OpenRC or experimental Finit running the system. Choose the language of the installer.",
+                   "NixOS без systemd: те же пакеты и конфигурация, а систему запускает s6, dinit, runit, OpenRC или экспериментальный Finit. Выберите язык установщика."),
         .art = art, .nart = nart, .items = langs, .n = 2,
         .keys = "↑↓  Enter  F10",
     };
@@ -2548,8 +2551,8 @@ static int step_kernel(void)
 static int step_init(void)
 {
     return choose(T("Init system", "Init-система"),
-                  T("What starts the system and runs its services. All run the same configuration: the services of NixOS's modules, systemctl, journalctl. It can be changed later: nixithos.init in /etc/nixith/configuration.nix, and a reboot.",
-                    "То, что запускает систему и её службы. Все работают с одной и той же конфигурацией: службы модулей NixOS, systemctl, journalctl. Сменить можно и потом: nixithos.init в /etc/nixith/configuration.nix и перезагрузка."),
+                  T("What starts the system and runs its services. Finit is experimental; it boots the current configuration but live switching is not implemented yet.",
+                    "То, что запускает систему и её службы. Finit экспериментальный: запускает выбранную конфигурацию, но переключение на ходу пока не работает."),
                   inits, NINITS, &S.init);
 }
 
@@ -2906,9 +2909,9 @@ static const struct tip {
     const char *kicker[2], *title[2], *body[2], *cmd, *img;
 } tips[] = {
     { { "NixithOS", "NixithOS" }, { "NixOS, without systemd", "NixOS без systemd" },
-      { "PID 1 is s6-linux-init, dinit, runit or OpenRC: the one chosen. Devices are eudev's, logs s6-log's. The packages, the modules and configuration.nix are NixOS's own.",
-        "PID 1 — s6-linux-init, dinit, runit или OpenRC, что выбрано. Устройства — от eudev, журналы — от s6-log. Пакеты, модули и configuration.nix — те же, что в NixOS." },
-      "cat /proc/1/comm      # s6-svscan, dinit, runit, openrc-init", NULL },
+      { "PID 1 is s6-linux-init, dinit, runit, OpenRC or Finit: the one chosen. Devices are eudev's, logs s6-log's. The packages, the modules and configuration.nix are NixOS's own.",
+        "PID 1 — s6-linux-init, dinit, runit, OpenRC или Finit, что выбрано. Устройства — от eudev, журналы — от s6-log. Пакеты, модули и configuration.nix — те же, что в NixOS." },
+      "cat /proc/1/comm      # s6-svscan, dinit, runit, openrc-init or finit", NULL },
     { { "Configuration", "Конфигурация" }, { "One file describes the whole system", "Вся система описана одним файлом" },
       { "Users, services, desktop, packages: everything is in /etc/nixith/configuration.nix. Change it, then build and switch to it in one go.",
         "Пользователи, службы, рабочий стол, пакеты — всё в /etc/nixith/configuration.nix. Измените его, а потом соберите систему и переключитесь на неё одной командой." },

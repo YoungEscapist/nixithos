@@ -43,7 +43,7 @@ set -euo pipefail
 : "${NI_SHELL:=bash}"        # bash zsh fish nushell
 : "${NI_LOADER:=systemd-boot}"  # systemd-boot limine grub refind (UEFI)
 : "${NI_KERNEL:=linuxPackages}"  # pkgs.<this>: linuxPackages_latest, _zen...
-: "${NI_INIT:=s6}"            # s6 dinit runit openrc (nixithos.init)
+: "${NI_INIT:=s6}"            # s6 dinit runit openrc finit (nixithos.init)
 : "${NI_UNFREE:=0}"
 : "${NI_NM_KEEP:=}"          # NetworkManager profiles to keep, a file a line
 : "${NI_DRY:=0}"
@@ -65,8 +65,8 @@ case $NI_KERNEL in
     *) fail "NI_KERNEL: $NI_KERNEL is not a kernel of nixpkgs" ;;
 esac
 case $NI_INIT in
-    s6 | dinit | runit | openrc) ;;
-    *) fail "NI_INIT: $NI_INIT is not an init system of NixithOS (s6, dinit, runit, openrc)" ;;
+    s6 | dinit | runit | openrc | finit) ;;
+    *) fail "NI_INIT: $NI_INIT is not an init system of NixithOS (s6, dinit, runit, openrc, finit)" ;;
 esac
 case $NI_FS in
     ext4 | btrfs) ;;
@@ -190,7 +190,7 @@ EOF
     if [ "$NI_INIT" = s6 ]; then
         cat << 'EOF'
   # The init system: s6 (s6-linux-init and s6-rc), the default.
-  # Alternatives: nixithos.init = "dinit", "runit" or "openrc" (after a reboot).
+  # Alternatives: nixithos.init = "dinit", "runit", "openrc" or "finit" (after a reboot).
 
 EOF
     else
