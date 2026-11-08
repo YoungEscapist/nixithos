@@ -2,3 +2,6 @@ result
 result-*
 *.qcow2
 .nixos-test-history
+checks/
+__pycache__/
+*.pyc

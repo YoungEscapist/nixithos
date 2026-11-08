@@ -190,6 +190,12 @@ in
 {
   inherit eval nixpkgs lib;
 
+  # A separate, strict target userland. Build tools stay on the Nix host.
+  musl = import ./musl {
+    inherit nixpkgs system;
+    configuration = import ./examples/musl-minimal.nix;
+  };
+
   # The test suite: all of these pass.
   tests = lib.mapAttrs (_: runTest) {
     boot = ./tests/boot.nix;
@@ -221,6 +227,9 @@ in
     # s6.systemdPackages = "rebuild": the same boot, with the packages compiled
     # without systemd (hours on a desktop, so not part of a quick run)
     rebuild = runRebuild ./tests/boot.nix;
+  } // lib.optionalAttrs (system == "x86_64-linux") {
+    musl = (import ./tests/musl.nix { inherit nixpkgs system; }).test;
+    musl-disk = (import ./tests/musl.nix { inherit nixpkgs system; }).diskTest;
   };
 
   # The same tests with dinit as init (nixithos.init = "dinit"):

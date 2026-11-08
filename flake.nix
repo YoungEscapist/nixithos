@@ -35,6 +35,8 @@
           // args
         );
 
+      lib.muslSystem = args: import ./musl ({ nixpkgs = nixpkgs.outPath; } // args);
+
       # ... or the same as a module, for a plain `nixpkgs.lib.nixosSystem`
       # (the nixpkgs it is given has to be the revision this tree was written
       # for, or at least one where `modules/module-list.nix` is the same):
@@ -57,6 +59,12 @@
 
       packages = forAllSystems (system: {
         vm = (tree system).configs.vm.vm;
+        musl-initrd = (tree system).musl.initrd;
+        musl-disk = (tree system).musl.diskImage;
+        musl-boot-disk = (tree system).musl.bootDiskImage;
+        musl-vm = (tree system).musl.vm;
+        musl-boot-vm = (tree system).musl.bootVm;
+        musl-dinit = (tree system).musl.dinit;
       });
 
       checks = forAllSystems (system: (tree system).tests);
