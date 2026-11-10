@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Ephemeral signed HTTPS cache for native-Nix QEMU tests; host stdlib only.
 
+The fixture must be an input-addressed store path (a derivation output):
+content-addressed paths such as `nix-store --add` results are self-certifying
+and are substituted without any signature, so the rejection checks would fail.
+
 Use on the live Nix host: a build sandbox normally lacks a readable local-store
 database/daemon socket. Nothing is downloaded and no host store path is signed.
 Only the destination cache narinfo is signed. Private keys stay in a temporary
@@ -138,7 +142,12 @@ class TLSCache:
         q = shlex.quote
         encoded_certificate = base64.b64encode(self.certificate.encode()).decode()
         console.check(f"test ! -e {q(self.source)}")
-        console.check(f"printf %s {q(encoded_certificate)} | /bin/busybox base64 -d > {q(certificate_path)}")
+        # BusyBox ash line editing truncates long input lines; send short pieces.
+        encoded_path = certificate_path + ".b64"
+        console.check(f": > {q(encoded_path)}")
+        for start in range(0, len(encoded_certificate), 400):
+            console.check(f"printf %s {q(encoded_certificate[start:start + 400])} >> {q(encoded_path)}")
+        console.check(f"/bin/busybox base64 -d {q(encoded_path)} > {q(certificate_path)}")
 
         def restore(url, key):
             return (f"{q(nix_store)} -r {q(self.source)} --option substituters {q(url)} "
@@ -152,7 +161,7 @@ class TLSCache:
             command = restore(url, key)
             logfile = "/run/musl-cache-" + name + ".log"
             console.check(f"if {command} > {q(logfile)} 2>&1; then false; else "
-                          f"test ! -e {q(self.source)} && "
+                          f"/bin/busybox cat {q(logfile)}; test ! -e {q(self.source)} && "
                           f"/bin/busybox grep -Ei 'not signed|signature|trusted-public-keys' {q(logfile)}; fi")
         narinfo_name = Path(self.source).name.split("-", 1)[0] + ".narinfo"
         for prefix in ("/unsigned/", "/signed/"):

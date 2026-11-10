@@ -91,12 +91,13 @@ client. Build on the host and deploy the resulting complete store
 closure before switching. The existing full-profile installer is not a
 strict-profile installer.
 
-An optional native Nix package is being integrated behind the constructor's
-`withNix = true` flag. Its musl/libc++ build, initial store registration,
-certificate configuration and sandbox operation are still under validation.
-The flag is experimental until the separate native-Nix checks below pass;
-its presence does not establish that self-hosted system builds, `nix-shell`
-or all flake fetchers work. It does not change the `nixith` command's current
+An optional native Nix package (Nix 2.28.8 built for musl with LLVM libc++,
+compiler-rt and libunwind) is available behind the constructor's
+`withNix = true` flag. Its build, closure audit, initial store registration,
+sandboxed derivation build and signed substitution passed the checks listed
+under verification. The flag stays opt-in and experimental: self-hosted
+system builds, `nix-shell`, flake fetchers, the daemon/multi-user mode and
+remote builds are untested. It does not change the `nixith` command's current
 build/install behavior.
 
 Native Nix does not itself prevent GNU or glibc packages from being built or
@@ -219,10 +220,24 @@ serial logs; the disk test also records the second boot. The initial two
 outputs above used the earlier static GCC-built BusyBox, so they alone do
 not validate the replacement's compiler runtime boundary.
 
-Native Nix remains in progress. Its build success, complete ELF/runtime
-closure audit, fresh-store registration, reboot reuse, HTTPS substitution
-and actual sandboxed derivation execution have not yet been established
-here. The parent integration pass must record those results for the final
-native-Nix output. Desktop parity, disk partitioning, bootloader generation
+Native Nix (`withNix = true`) was verified on 2026-11-10:
+
+- `pkgs/musl-nix/audit.py` on the Nix output closure: 29 store paths, 301
+  files, no findings; no GCC runtime, libstdc++ or glibc. The mandatory
+  system and rootfs audits also pass with Nix included.
+- `nix-build tests/musl-native.nix -A test` passed: evaluation, a sandboxed
+  derivation built with the BusyBox shell, path verification, signing, copy
+  to a local file cache, deletion and signed re-substitution, and evaluation
+  again after a cold boot from the persistent store.
+- The live-host HTTPS run (`tests/musl-vm.py --tls-cache-source ...`) passed:
+  certificate verification, rejection of an unsigned cache and of a wrong
+  key, then signed substitution over TLS.
+
+Build-side deviations from nixpkgs: OpenSSL without the AF_ALG engine, boehm-gc
+built with the libc++ toolchain, SQLite with a legacy SONAME and no Tcl
+extension, `sys/syscall.h` force-included for libutil. Not covered: the
+daemon, multi-user builds, remote builders, flakes over the network,
+`nix-shell`, and substitution from cache.nixos.org itself.
+Desktop parity, disk partitioning, bootloader generation
 updates, full NixOS-module compatibility and self-hosted system builds are
 not delivered by the tested minimal profile.

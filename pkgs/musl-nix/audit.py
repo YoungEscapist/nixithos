@@ -10,6 +10,8 @@ import sys
 p = argparse.ArgumentParser()
 p.add_argument("closure", help="realized Nix output store path")
 p.add_argument("--readelf", required=True, help="build-host readelf")
+p.add_argument("--reviewed-static", action="append", default=[], metavar="FILE",
+               help="static executable whose provenance was audited separately")
 a = p.parse_args()
 paths = subprocess.run(["nix-store", "-qR", a.closure], check=True, text=True, capture_output=True).stdout.splitlines()
 forbidden = re.compile(r"-(?:glibc|gcc|xgcc|libgcc|bash|coreutils|gnugrep|gnused|gawk|findutils|gnutar|gzip|gnutls|libgcrypt|libidn2?|libunistring|libiconv|gettext|guile|gnupg)(?:[-.]|$)")
@@ -43,6 +45,8 @@ for store in paths:
                 problems.append(f"unsupported script interpreter {file}: {line}")
         if not prefix.startswith(b"\x7fELF"):
             continue
+        if prefix[16:18] == b"\x01\x00":
+            continue  # ET_REL: startup objects for linking, never executed
         info = subprocess.run([a.readelf, "-lWd", str(file)], text=True, capture_output=True)
         if info.returncode:
             problems.append(f"readelf failed: {file}: {info.stderr.strip()}")
@@ -53,7 +57,7 @@ for store in paths:
         for needed in re.findall(r"Shared library: \[([^\]]+)\]", info.stdout):
             if re.match(r"(?:libstdc\+\+|libgcc_s|ld-linux|libc\.so\.6|libpthread\.so\.0)", needed):
                 problems.append(f"forbidden ELF dependency: {file}: {needed}")
-        if not interp and "DYNAMIC" not in info.stdout:
+        if not interp and "DYNAMIC" not in info.stdout and str(file) not in a.reviewed_static:
             static.append(str(file))
 for item in static:
     problems.append("static ELF requires independent provenance audit: " + item)

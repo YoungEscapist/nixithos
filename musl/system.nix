@@ -158,6 +158,7 @@ let
     cp -a ${system}/. "$out/"
     chmod u+w "$out" "$out/etc" "$out/nix" "$out/nix/store"
     ${lib.optionalString (nativeNix != null) ''
+      chmod u+w "$out/etc/nix"
       cp ${closure}/registration "$out/etc/nix/registration"
     ''}
     if ! ${hostPkgs.python3}/bin/python3 ${../scripts/audit-musl-closure.py} --rootfs "$out" --json > "$TMPDIR/audit.json"; then
