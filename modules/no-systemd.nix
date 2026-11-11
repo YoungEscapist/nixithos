@@ -20,12 +20,19 @@ let
   # (the name of the store path, not the derivation's `name`: the "dev"
   # output of systemd-260.5 is systemd-260.5-dev)
   sameLengthAs =
-    original: name:
+    original: wanted:
     let
       path = builtins.unsafeDiscardStringContext (toString original);
       # /nix/store/<32 characters>-<name>
       originalName = builtins.substring 33 (-1) (baseNameOf path);
       n = lib.stringLength originalName;
+      # (a version of systemd with three characters, "systemd-262", is shorter
+      # than "systemd-shim": the shim is then "sd-shim")
+      name =
+        if lib.stringLength wanted > n && lib.hasPrefix "systemd-shim" wanted then
+          "sd-shim" + lib.removePrefix "systemd-shim" wanted
+        else
+          wanted;
     in
     assert lib.assertMsg (lib.stringLength name <= n) ''
       s6.systemdPackages = "replace": the replacement name "${name}" is longer than
