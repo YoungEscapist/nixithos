@@ -26,6 +26,16 @@ let
   # The upstream list also has a few inline modules; those have no path.
   rel = p: if lib.isPath p || lib.isString p then lib.removePrefix "${root}/" (toString p) else null;
 
+  # nixpkgs 26.11 removed the scripted initrd: the hooks of stage 1
+  # (boot.initrd.postDeviceCommands and friends) are declared as removed in
+  # the `imports` of systemd's initrd module, and the scripted halves of the
+  # modules that used them (LUKS, LVM, the file systems...) are gone.  Stage 1
+  # here is still the scripted one (./system/boot/stage-1.nix), so those
+  # declarations are left out and the halves come back from
+  # ./system/boot/scripted.
+  noScripted = lib.versionAtLeast lib.trivial.release "26.11";
+  noImports = lib.optionals noScripted [ "system/boot/systemd/initrd.nix" ];
+
   optionsOnly = [
     # Unit handling itself                   -> ./compat/units.nix, ./compat/base-units.nix
     "system/boot/systemd.nix"
@@ -70,6 +80,11 @@ let
   dropped = [
     # Scripted initrd, vendored and adapted   -> ./system/boot/stage-1.nix
     "system/boot/stage-1.nix"
+  ]
+  # LUKS with its scripted half              -> ./system/boot/scripted
+  ++ lib.optionals noScripted [
+    "system/boot/luksroot.nix"
+    "tasks/encrypted-devices.nix"
   ];
 
   # Import an upstream module, keeping its option declarations (and the
@@ -81,7 +96,7 @@ let
       f = import file;
       strip = m: {
         options = m.options or { };
-        imports = m.imports or [ ];
+        imports = if lib.elem relPath noImports then [ ] else m.imports or [ ];
       };
     in
     lib.setDefaultModuleLocation "${file} (options only)" (
@@ -138,7 +153,10 @@ let
     ./desktop/lxqt.nix
     ./desktop/desktops.nix
     ./desktop/utilities.nix
-  ];
+  ]
+  ++ lib.optional noScripted (
+    lib.setDefaultModuleLocation (toString ./system/boot/scripted) (import ./system/boot/scripted)
+  );
 in
 assert lib.assertMsg (unknown == [ ]) ''
   modules/parts.nix refers to upstream modules that no longer exist:

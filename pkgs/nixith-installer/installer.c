@@ -64,6 +64,9 @@
 #ifndef LOGO_TXT
 #define LOGO_TXT "/etc/nixithos/logo.txt"
 #endif
+#ifndef PINS
+#define PINS "../../lib"
+#endif
 #ifndef SHOTS
 #define SHOTS "./screenshots"
 #endif
@@ -84,7 +87,7 @@ static struct {
     char fullname[160], user[64], host[64];
     char pw1[128], pw2[128], rpw1[128], rpw2[128];
     int rootsame, autologin, user_edited;
-    int desktop, dm, shell, loader, kernel, init, unfree;
+    int release, desktop, dm, shell, loader, kernel, init, unfree;
     char disk[64], disk_desc[200];
     int manual, fs, efi, encrypt;
     char luks_pw[128], luks_repeat[128];
@@ -157,8 +160,27 @@ static const struct opt loaders[] = {
 };
 #define NLOADERS (int)(sizeof loaders / sizeof *loaders)
 
+/* id: NI_CHANNEL of install.sh.  The releases are those of the two nixpkgs
+ * the tree is tested with (lib/nixpkgs.json, lib/nixpkgs-unstable.json):
+ * the image is built of the first; default.nix says what they are. */
+#ifndef R_STABLE
+#define R_STABLE "26.05"
+#define R_STABLE_NAME "Yarara"
+#define R_UNSTABLE "26.11"
+#define R_UNSTABLE_NAME "Zokor"
+#endif
+static const struct opt releases[] = {
+    { "stable", R_STABLE " " R_STABLE_NAME " (stable)",
+      "The current release of NixOS, which this image is built of and NixithOS is tested on the most: what is on the image is installed from it, without downloading. It gets fixes and security updates, not new versions of programs.",
+      "Текущий выпуск NixOS: из него собран этот образ, и на нём NixithOS проверена больше всего. То, что есть на образе, ставится с него, без скачивания. Получает исправления и обновления безопасности, а не новые версии программ." },
+    { "unstable", R_UNSTABLE " " R_UNSTABLE_NAME " (unstable)",
+      "The branch the next release is made on: the newest versions of the programs, the kernels and the desktops. Everything is downloaded during the installation (the internet is needed, and more time), and Parallax is compiled on this computer. Less tested: ZFS or bcachefs as the root, the network and SSH in the initrd and Plymouth are not available on it yet. `nixith channel stable` goes back.",
+      "Ветка, на которой готовится следующий выпуск: самые новые версии программ, ядер и рабочих столов. Всё скачивается во время установки (нужен интернет и больше времени), а Parallax собирается на этом компьютере. Проверена меньше: корень на ZFS или bcachefs, сеть и SSH в initrd и Plymouth на ней пока недоступны. Вернуться: `nixith channel stable`." },
+};
+#define NRELEASES (int)(sizeof releases / sizeof *releases)
+
 /* id: the kernel's packages in nixpkgs (boot.kernelPackages = pkgs.<id>);
- * the versions are those of the nixpkgs the image is built of (default.nix) */
+ * the versions are those of the nixpkgs of the release (default.nix) */
 #ifndef K_LTS
 #define K_LTS "6.18"
 #define K_LATEST "7.3"
@@ -166,6 +188,14 @@ static const struct opt loaders[] = {
 #define K_6_6 "6.6"
 #define K_ZEN "7.2"
 #define K_XANMOD "7.2"
+#endif
+#ifndef KU_LTS
+#define KU_LTS K_LTS
+#define KU_LATEST K_LATEST
+#define KU_6_12 K_6_12
+#define KU_6_6 K_6_6
+#define KU_ZEN K_ZEN
+#define KU_XANMOD K_XANMOD
 #endif
 static const struct opt kernels[] = {
     { "linuxPackages", "Linux " K_LTS " LTS",
@@ -188,6 +218,20 @@ static const struct opt kernels[] = {
       "Ещё одно свежее ядро, настроенное для рабочего стола и игр, со своим набором патчей и настроек планировщика." },
 };
 #define NKERNELS (int)(sizeof kernels / sizeof *kernels)
+
+/* the name of a kernel in the release chosen: the versions differ */
+static const char *kernel_name(int i)
+{
+    static const char *fmt[] = { "Linux %s LTS", "Linux %s", "Linux %s LTS", "Linux %s LTS",
+                                 "Linux Zen %s", "Linux XanMod %s" };
+    static const char *ver[2][6] = {
+        { K_LTS, K_LATEST, K_6_12, K_6_6, K_ZEN, K_XANMOD },
+        { KU_LTS, KU_LATEST, KU_6_12, KU_6_6, KU_ZEN, KU_XANMOD },
+    };
+    static char name[6][48];
+    snprintf(name[i], sizeof name[i], fmt[i], ver[S.release][i]);
+    return name[i];
+}
 
 /* id: nixithos.init */
 static const struct opt inits[] = {
@@ -250,17 +294,17 @@ static const char *optname(const struct opt *o)
 
 enum {
     ST_WELCOME, ST_GUIDE, ST_NETWORK, ST_TZ, ST_LOCALE, ST_KEYBOARD, ST_USER,
-    ST_DESKTOP, ST_LOGIN, ST_SHELL, ST_LOADER, ST_KERNEL, ST_INIT, ST_UNFREE,
+    ST_RELEASE, ST_DESKTOP, ST_LOGIN, ST_SHELL, ST_LOADER, ST_KERNEL, ST_INIT, ST_UNFREE,
     ST_DISK, ST_SUMMARY, ST_INSTALL, NSTEPS
 };
 
 static const char *step_name(int i)
 {
     static const char *en[] = { "Welcome", "Guide", "Network", "Time zone", "Language",
-        "Keyboard", "User", "Desktop", "Login", "Shell", "Boot loader", "Kernel",
+        "Keyboard", "User", "Release", "Desktop", "Login", "Shell", "Boot loader", "Kernel",
         "Init system", "Software", "Disk", "Summary", "Install" };
     static const char *r[] = { "Приветствие", "Справка", "Сеть", "Часовой пояс", "Язык",
-        "Клавиатура", "Пользователь", "Рабочий стол", "Вход", "Оболочка", "Загрузчик",
+        "Клавиатура", "Пользователь", "Выпуск", "Рабочий стол", "Вход", "Оболочка", "Загрузчик",
         "Ядро", "Init-система", "Программы", "Диск", "Итог", "Установка" };
     return ru ? r[i] : en[i];
 }
@@ -2497,11 +2541,23 @@ static int choose(const char *head, const char *intro, const struct opt *o, int 
     return run_menu(&m, sel);
 }
 
+static int step_release(void)
+{
+    return choose(T("Release", "Выпуск"),
+                  S.online ? T("Which nixpkgs the system is built from: the packages, the kernels and the NixOS modules. It can be changed later: `sudo nixith channel stable` or `unstable`, then `sudo nixith boot`.",
+                               "Из какого nixpkgs собирается система: пакеты, ядра и модули NixOS. Сменить можно и потом: `sudo nixith channel stable` или `unstable`, затем `sudo nixith boot`.")
+                           : T("Which nixpkgs the system is built from. There is no internet connection now: only the stable release can be installed without one.",
+                               "Из какого nixpkgs собирается система. Интернета сейчас нет: без него можно установить только стабильный выпуск."),
+                  releases, NRELEASES, &S.release);
+}
+
 static int step_desktop(void)
 {
     return choose(T("Desktop", "Рабочий стол"),
-                  T("What you will see after logging in. Parallax is on this image; the others are downloaded during the installation.",
-                    "Что вы увидите после входа. Parallax есть на этом образе, остальные скачиваются во время установки."),
+                  S.release ? T("What you will see after logging in. On the unstable release all of them are downloaded during the installation, and Parallax is compiled.",
+                                "Что вы увидите после входа. На нестабильном выпуске все они скачиваются во время установки, а Parallax собирается.")
+                            : T("What you will see after logging in. Parallax is on this image; the others are downloaded during the installation.",
+                                "Что вы увидите после входа. Parallax есть на этом образе, остальные скачиваются во время установки."),
                   desktops, NDESKTOPS, &S.desktop);
 }
 
@@ -2541,11 +2597,22 @@ static int step_loader(void)
 static int step_kernel(void)
 {
     char intro[400];
-    snprintf(intro, sizeof intro,
-             T("The Linux kernel the system runs. Linux %s is on this image; the others are downloaded during the installation. It can be changed later: boot.kernelPackages in /etc/nixith/configuration.nix.",
-               "Ядро Linux, на котором работает система. Linux %s есть на этом образе, остальные скачиваются во время установки. Сменить его можно и потом: boot.kernelPackages в /etc/nixith/configuration.nix."),
-             K_LTS);
-    return choose(T("Kernel", "Ядро"), intro, kernels, NKERNELS, &S.kernel);
+    if (S.release)
+        snprintf(intro, sizeof intro, "%s",
+                 T("The Linux kernel the system runs, in the versions of the unstable release; each is downloaded during the installation. It can be changed later: boot.kernelPackages in /etc/nixith/configuration.nix.",
+                   "Ядро Linux, на котором работает система, в версиях нестабильного выпуска; любое скачивается во время установки. Сменить его можно и потом: boot.kernelPackages в /etc/nixith/configuration.nix."));
+    else
+        snprintf(intro, sizeof intro,
+                 T("The Linux kernel the system runs. Linux %s is on this image; the others are downloaded during the installation. It can be changed later: boot.kernelPackages in /etc/nixith/configuration.nix.",
+                   "Ядро Linux, на котором работает система. Linux %s есть на этом образе, остальные скачиваются во время установки. Сменить его можно и потом: boot.kernelPackages в /etc/nixith/configuration.nix."),
+                 K_LTS);
+    /* (the names with the versions of the release) */
+    static struct opt k[NKERNELS];
+    for (int i = 0; i < NKERNELS; i++) {
+        k[i] = kernels[i];
+        k[i].name = kernel_name(i);
+    }
+    return choose(T("Kernel", "Ядро"), intro, k, NKERNELS, &S.kernel);
 }
 
 static int step_init(void)
@@ -2788,12 +2855,13 @@ static int step_summary(void)
         ROW(T("Keyboard", "Клавиатура"), "%s", keyboards[S.kb].name);
         ROW(T("User", "Пользователь"), "%s (%s)%s", S.fullname, S.user, S.autologin ? T(", logs in automatically", ", входит автоматически") : "");
         ROW(T("Computer", "Компьютер"), "%s", S.host);
+        ROW(T("Release", "Выпуск"), "%s", releases[S.release].name);
         ROW(T("Desktop", "Рабочий стол"), "%s", optname(&desktops[S.desktop]));
         if (strcmp(desktops[S.desktop].id, "none"))
             ROW(T("Login", "Вход"), "%s", optname(&dms[S.dm]));
         ROW(T("Shell", "Оболочка"), "%s", shells[S.shell].name);
         ROW(T("Boot loader", "Загрузчик"), "%s", S.efi ? loaders[S.loader].name : "GRUB (BIOS)");
-        ROW(T("Kernel", "Ядро"), "%s", kernels[S.kernel].name);
+        ROW(T("Kernel", "Ядро"), "%s", kernel_name(S.kernel));
         ROW(T("Init system", "Init-система"), "%s", inits[S.init].name);
         ROW(T("Software", "Программы"), "%s", S.unfree ? T("unfree allowed", "несвободные разрешены") : T("only free", "только свободные"));
         if (S.manual)
@@ -2882,6 +2950,9 @@ static void setenv_choices(void)
     setenv("NI_LOADER", loaders[S.loader].id, 1);
     setenv("NI_KERNEL", kernels[S.kernel].id, 1);
     setenv("NI_INIT", inits[S.init].id, 1);
+    setenv("NI_CHANNEL", releases[S.release].id, 1);
+    if (!getenv("NI_PINS"))
+        setenv("NI_PINS", PINS, 1);
     setenv("NI_UNFREE", S.unfree ? "1" : "0", 1);
     char files[4096];
     kept_files(files, sizeof files);
@@ -3284,7 +3355,7 @@ int main(int argc, char **argv)
 
     int (*steps[NSTEPS])(void) = {
         step_welcome, step_guide, step_network, step_tz, step_locale, step_keyboard, step_user,
-        step_desktop, step_login, step_shell, step_loader, step_kernel, step_init, step_unfree,
+        step_release, step_desktop, step_login, step_shell, step_loader, step_kernel, step_init, step_unfree,
         step_disk, step_summary, step_install,
     };
     for (cur_step = 0; cur_step < NSTEPS;) {

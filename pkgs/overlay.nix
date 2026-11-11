@@ -14,6 +14,30 @@ final: prev: {
     };
   };
 
+  # s6-ftrigrd keeps its listeners in a list.  A one-shot listener whose
+  # event came was forgotten by the protocol layer (skalibs' sassserver) but
+  # stayed in that list; the next subscription got the same slot and was
+  # linked in a second time, so the list became a loop and s6-ftrigrd wrote
+  # past its array of descriptors.  With s6-rc 0.7, which keeps one
+  # s6-ftrigrd for many waits, it segfaulted in about half of the boots, and
+  # what waited on it (s6-svwait, systemctl) saw services as never started.
+  # Also, a new listener was put at the head without the old head pointing
+  # back at it.  Not upstream yet; here until a release has it.
+  # (in the scope of skarnet's packages, so that the ones built on s6 -
+  # s6-rc, s6-linux-init - are built on this one)
+  skawarePackages = prev.skawarePackages.overrideScope (
+    _: sprev: {
+      s6 = sprev.s6.overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [ ./s6/ftrigrd-list.patch ];
+      });
+    }
+  );
+  inherit (final.skawarePackages)
+    s6
+    s6-networking
+    s6-rc
+    ;
+
   nixithos = final.lib.makeScope final.newScope (self: {
     # build time: unit files -> s6-rc source
     unitc = self.callPackage ./unitc { };
@@ -53,7 +77,7 @@ final: prev: {
   # s6-linux-init-maker gives the catch-all log directory the setgid bit.  The
   # Nix build sandbox refuses to create anything setgid, and the bit only
   # matters when the logger runs as a dedicated user, which it does not here.
-  s6-linux-init = prev.s6-linux-init.overrideAttrs (old: {
+  s6-linux-init = final.skawarePackages.s6-linux-init.overrideAttrs (old: {
     postPatch = (old.postPatch or "") + ''
       substituteInPlace src/init/s6-linux-init-maker.c \
         --replace-fail 'UNCAUGHT_DIR, uid, gid, 02750)' 'UNCAUGHT_DIR, uid, gid, 0750)'

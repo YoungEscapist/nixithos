@@ -164,6 +164,20 @@
         err = machine.fail("nixith rollback --service t-keep 2>&1")
         assert "single service" in err
 
+    with subtest("nixith channel: the nixpkgs of the next build is a file next to the configuration"):
+        out = machine.succeed("nixith channel")
+        print(out)
+        assert "the nixpkgs of the running system" in out, out
+        assert "stable:   nixos-" in out and "unstable: nixos-unstable" in out, out
+        machine.succeed("mkdir -p /etc/nixith")
+        machine.succeed("nixith channel unstable 2>&1")
+        machine.succeed("grep -q nixos-unstable /etc/nixith/nixpkgs.json")
+        assert "nixos-unstable" in machine.succeed("nixith channel").splitlines()[0]
+        machine.succeed("nixith channel stable 2>&1")
+        machine.fail("grep -q nixos-unstable /etc/nixith/nixpkgs.json")
+        machine.fail("nixith channel testing 2>&1")
+        machine.succeed("rm /etc/nixith/nixpkgs.json")
+
     with subtest("nixith why"):
         out = machine.succeed("nixith why t-keep")
         print(out)

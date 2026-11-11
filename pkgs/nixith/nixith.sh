@@ -63,6 +63,9 @@ The running system:
 
 The rest:
   parts             what the running system was built from, part by part
+  channel           the nixpkgs the system is built from: `nixith channel`
+                    shows it, `nixith channel unstable` (or `stable`) changes
+                    it for the next build (/etc/nixith/nixpkgs.json)
   generations       the generations of the system
   snapshots         the btrfs snapshots taken before each switch
                     (nixithos.snapshots): list, delete ID..., create, prune
@@ -89,6 +92,50 @@ config_file() {
     else
         echo "$root/etc/nixos/configuration.nix"
     fi
+}
+
+# The nixpkgs a configuration is built with, as a Nix expression: the
+# revision named in nixpkgs.json next to the configuration (lib/pin.nix), or
+# without one the nixpkgs this system was built with.
+nixpkgs_of() {
+    local pin
+    pin=$(dirname "$1")/nixpkgs.json
+    if [ -e "$pin" ]; then
+        jq -e '.rev and .sha256' "$pin" > /dev/null || die "$pin does not name a revision of nixpkgs (rev, sha256)"
+        echo "import $tree/lib/pin.nix $(realpath "$pin")"
+    else
+        echo "$nixpkgs"
+    fi
+}
+
+# nixith channel: which nixpkgs, and changing it
+channel() {
+    local dir pin
+    dir=$(dirname "$(config_file)")
+    pin=$dir/nixpkgs.json
+    describe() {
+        jq -r '"\(.branch // "nixpkgs") \(.release // "") (\(.rev[0:12]))" | gsub("  "; " ")' "$1"
+    }
+    case ${1:-} in
+        "")
+            if [ -e "$pin" ]; then
+                echo "$(describe "$pin"), from $pin"
+            else
+                echo "the nixpkgs of the running system: $(cat "$nixpkgs/.version" 2> /dev/null || echo '?') ($(cut -c1-12 "$nixpkgs/.git-revision" 2> /dev/null || basename "$nixpkgs"))"
+            fi
+            echo "  stable:   $(describe "$tree/lib/nixpkgs.json")"
+            echo "  unstable: $(describe "$tree/lib/nixpkgs-unstable.json")"
+            ;;
+        stable | unstable)
+            [ "$(id -u)" = 0 ] || [ -w "$dir" ] || die "channel $1 writes $pin: run it as root (sudo nixith channel $1)"
+            local from=$tree/lib/nixpkgs.json
+            [ "$1" = stable ] || from=$tree/lib/nixpkgs-unstable.json
+            install -m 0644 "$from" "$pin"
+            say "$pin: $(describe "$pin")"
+            say "The next build uses it.  A change of release is best booted into: sudo nixith boot, then reboot."
+            ;;
+        *) die "channel: stable or unstable (or nothing, to see which)" ;;
+    esac
 }
 
 # the flake to build by default: /etc/nixith/flake.nix, if there is one
@@ -264,18 +311,18 @@ build_system() {
         fi
         [ "$flake" = - ] && flake=""
 
-        local args=(--arg tree "$tree" --arg nixpkgs "$nixpkgs")
+        local args=(--arg tree "$tree")
         local what
         if [ -n "$flake" ]; then
             flake=$(flake_ref "$flake")
-            args+=(--argstr flake "$flake")
+            args+=(--argstr flake "$flake" --arg nixpkgs "$nixpkgs")
             what="the flake $flake"
             nixArgs+=(--extra-experimental-features "nix-command flakes")
         else
             [ -n "$file" ] || file=$(config_file)
             [ -e "$file" ] || die "no configuration at $file (nixith generate-config writes one)"
             file=$(realpath "$file")
-            args+=(--argstr configuration "$file")
+            args+=(--argstr configuration "$file" --arg nixpkgs "$(nixpkgs_of "$file")")
             what=$file
             case $file in /etc/nixos/*)
                 say "(the configuration is still in /etc/nixos; NixithOS keeps it in /etc/nixith)" ;;
@@ -401,14 +448,16 @@ install_system() {
     {
         echo "import $tree/lib/nixith.nix {"
         echo "  tree = $tree;"
-        echo "  nixpkgs = $nixpkgs;"
         echo "  copySources = true;"
         if [ -n "$flake" ]; then
             flake=$(flake_ref "$flake")
+            echo "  nixpkgs = $nixpkgs;"
             echo "  flake = \"$flake\";"
         else
             [ -n "$file" ] || file=$(config_file "$root")
             [ -e "$file" ] || die "no configuration at $file (nixith generate-config --root $root writes one)"
+            # (the release chosen for the new system: nixpkgs.json next to it)
+            echo "  nixpkgs = $(nixpkgs_of "$file");"
             echo "  configuration = \"$(realpath "$file")\";"
         fi
         echo "}"
@@ -504,6 +553,7 @@ case $command in
     why) why_unit "$@" ;;
     services) exec "$services_tui" "$@" ;;
     parts) parts "$@" ;;
+    channel) channel "$@" ;;
     generations | list-generations)
         generations "$@"
         boot_note

@@ -1,10 +1,25 @@
 # Settings every system built from this tree shares.
 {
   config,
+  options,
   lib,
   pkgs,
   ...
 }:
+
+lib.mkMerge [
+  # What every service has in its PATH.  Until 26.05 the list was part of the
+  # type of a service; from 26.11 on it is an option, set by systemd's module
+  # (whose configuration is not used here).
+  (lib.optionalAttrs (options.systemd ? defaultPath) {
+    systemd.defaultPath = [
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.gnugrep
+      pkgs.gnused
+      config.systemd.package
+    ];
+  })
 
 {
   nixpkgs.overlays = lib.mkBefore [ (import ../pkgs/overlay.nix) ];
@@ -52,3 +67,4 @@
   # and fail there; in one part they are all found.
   documentation.nixos.options.splitBuild = lib.mkDefault false;
 }
+]

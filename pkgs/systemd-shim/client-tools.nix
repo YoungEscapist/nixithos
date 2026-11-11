@@ -24,7 +24,8 @@
 
 let
   # (not "systemd-…": such a name is what the closure checks look for)
-  wanted = "client-tools";
+  # (cut to the length of the package's name, when that one is shorter)
+  wanted = lib.substring 0 (lib.stringLength systemd.name) "client-tools";
   n = lib.stringLength systemd.name;
   name = wanted + lib.concatStrings (lib.genList (_: "_") (n - lib.stringLength wanted));
   keepLibs = [

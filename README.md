@@ -95,6 +95,10 @@ for the boot and for what comes after: no second database. A unit's
 processes run under `unit-supervise`, which does for them what
 `s6-supervise` does under s6. A switch to the other init system applies the
 rest of the configuration at once and the init system at the next boot.
+An installed system changes its init the same way: the line in
+`/etc/nixith/configuration.nix`, `sudo nixith boot` and a reboot (the test
+`init-change` takes one installation through dinit, runit and OpenRC and back
+to s6).
 
 ```console
 $ cat /proc/1/comm
@@ -326,6 +330,35 @@ The other tools are subcommands or `nixith-*`: `nixith install`
 (`nixith-install`), `nixith generate-config` (writes to `/etc/nixith`),
 `nixith enter`, `nixith option`, `nixith version`, `nixith edit`.
 
+### The release: stable or unstable
+
+A system is built from one nixpkgs. Which one is a file next to its
+configuration, `/etc/nixith/nixpkgs.json` (a branch, a revision and its
+hash); without the file it is the nixpkgs the running system was built with.
+The tree is tested with two: the stable release (`lib/nixpkgs.json`, now
+`nixos-26.05`) and a revision of `nixos-unstable` (`lib/nixpkgs-unstable.json`,
+now 26.11 "Zokor"). The installer asks which, and `nixith channel` changes it
+afterwards:
+
+```console
+$ nixith channel
+the nixpkgs of the running system: 26.05 (7dcdd87373d7)
+  stable:   nixos-26.05 26.05 (7dcdd87373d7)
+  unstable: nixos-unstable 26.11 (f4a03c008967)
+$ sudo nixith channel unstable     # writes /etc/nixith/nixpkgs.json
+$ sudo nixith boot && reboot       # a change of release is best booted into
+```
+
+nixpkgs 26.11 has dropped the scripted initrd, which is what stage 1 is here.
+The halves of its modules that fed it (LUKS, LVM, the file systems, software
+RAID, the console font and keymap) are kept in
+[modules/system/boot/scripted](modules/system/boot/scripted) as they were in
+26.05. Not brought back, and so not available on the unstable release: ZFS or
+bcachefs as the root, clevis, iSCSI and multipath roots, Plymouth, and the
+network, SSH and OpenVPN in the initrd. The image itself is built from the
+stable release only. `nix-build -A unstable.tests.boot` (and the rest under
+`unstable.`) runs the tests on the unstable revision.
+
 ## Flakes
 
 Both forms work, and `nixpkgs` stays yours:
@@ -430,7 +463,9 @@ framebuffer). It begins with a network step: a simpler nmtui on top of
 password: WPA2, WPA3, WEP or 802.1X with a login, hidden networks, a cable
 with the address, DNS and MAC by hand, DSL / PPPoE. The connection made there
 is copied into the installed system. `nixith-net` starts that step alone, on
-any system. The kernel step offers the long-term one
+any system. The release step asks which nixpkgs the system is built from:
+the stable release the image is made of, or unstable (26.11), which is
+downloaded whole. The kernel step offers the long-term one
 NixOS uses by default (it is on the image), the newest, the older long-term
 6.12 or 6.6, Zen or XanMod (`boot.kernelPackages`; all of them come from the
 NixOS cache). After it comes the init system: s6, dinit, runit, OpenRC or Finit (experimental)

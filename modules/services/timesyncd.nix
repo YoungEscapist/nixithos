@@ -2,13 +2,14 @@
 # containers) with a small SNTP client in the place of systemd-timesyncd.
 #
 # It is configured the way timesyncd is: the options of the upstream module
-# (`servers`, `fallbackServers`, `extraConfig`) end up in
+# (`servers`, `fallbackServers`, `settings.Time` or the older `extraConfig`) end up in
 # /etc/systemd/timesyncd.conf, which unit-sntp reads.  It keeps the clock
 # from falling behind the last synchronization on machines that have no
 # battery-backed one, and says so with /run/systemd/timesync/synchronized,
 # which is what `systemd-time-wait-sync` and the like wait for.
 {
   config,
+  options,
   lib,
   pkgs,
   ...
@@ -16,6 +17,21 @@
 
 let
   cfg = config.services.timesyncd;
+
+  # the rest of [Time]: `settings.Time` (nixpkgs 26.11), or `extraConfig`
+  value = v: if lib.isBool v then lib.boolToString v else toString v;
+  extra =
+    if options.services.timesyncd ? settings then
+      lib.concatStrings (
+        lib.mapAttrsToList (k: v: lib.concatMapStrings (x: "${k}=${value x}\n") (lib.toList v)) (
+          removeAttrs cfg.settings.Time [
+            "NTP"
+            "FallbackNTP"
+          ]
+        )
+      )
+    else
+      cfg.extraConfig;
 in
 
 {
@@ -36,7 +52,7 @@ in
       + lib.optionalString (cfg.fallbackServers != null) ''
         FallbackNTP=${lib.concatStringsSep " " cfg.fallbackServers}
       ''
-      + cfg.extraConfig;
+      + extra;
 
     systemd.services.systemd-timesyncd = {
       description = "Network Time Synchronization";

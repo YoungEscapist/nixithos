@@ -213,6 +213,8 @@ in
     timesync = ./tests/timesync.nix;
     # an installed system: GRUB (BIOS) and Limine (UEFI) start s6 and reboot
     bootloader = ./tests/bootloader.nix;
+    # an installed system goes from one init system to another and back
+    init-change = ./tests/init-change.nix;
     # a generation that does not boot is gone from the boot loader's default
     rollback-systemd-boot = ./tests/rollback-systemd-boot.nix;
     rollback-grub = ./tests/rollback-grub.nix;
@@ -307,6 +309,16 @@ in
   #
   #   nix-build -A upstreamDinit.openssh
   upstreamDinit = upstreamFor "upstreamDinit" "dinit";
+
+  # All of the above on the other nixpkgs the tree is tested with, the
+  # revision of nixos-unstable in lib/nixpkgs-unstable.json (what `nixith
+  # channel unstable` and the installer's "unstable" release build from):
+  #
+  #   nix-build -A unstable.tests.boot
+  unstable = import ./. {
+    nixpkgs = import ./lib/pin.nix ./lib/nixpkgs-unstable.json;
+    inherit system salt;
+  };
 
   # the installation/live ISO (images/iso.nix)
   iso = (eval { modules = [ ./images/iso.nix ]; }).config.system.build.isoImage;

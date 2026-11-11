@@ -1,5 +1,6 @@
 {
   "branch": "nixos-26.05",
+  "release": "26.05",
   "rev": "7dcdd87373d72e7a2173e4db02e20d3d7f495cfd",
   "sha256": "sha256-tItrb9M8eYA6WhFgmT9tpGKueri3+wRuVA952o/2xSU="
 }

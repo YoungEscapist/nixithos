@@ -13,6 +13,7 @@
 # which is what other units order themselves after.
 {
   config,
+  options,
   lib,
   pkgs,
   ...
@@ -21,24 +22,44 @@
 let
   cfg = config.s6.logging;
   rsyslogd = config.services.rsyslogd.enable;
+  # journald's options: `services.journald.settings.Journal` (nixpkgs 26.11),
+  # or the options and `extraConfig` it had before
+  hasSettings = options.services.journald ? settings;
+  journal = config.services.journald.settings.Journal;
+  yes =
+    v:
+    lib.elem v [
+      true
+      "yes"
+      "true"
+      "1"
+      "on"
+    ];
   # (what journald would do: send the messages on to the syslog daemon)
-  forward = rsyslogd && config.services.journald.forwardToSyslog;
+  forward =
+    rsyslogd
+    && (
+      if hasSettings then yes (journal.ForwardToSyslog or false) else config.services.journald.forwardToSyslog
+    );
 
-  # `ForwardToConsole=yes` and `TTYPath=` of journald.conf, as set by
-  # `services.journald.console` or in `extraConfig` (a test VM sets them to
-  # have what its machines log appear on the serial console, where the test
-  # driver looks for it): the loggers write what they are given there too.
+  # `ForwardToConsole=yes` and `TTYPath=` of journald.conf (a test VM sets
+  # them to have what its machines log appear on the serial console, where
+  # the test driver looks for it): the loggers write what they are given
+  # there too.
   consoleTty =
-    let
-      extra = config.services.journald.extraConfig;
-      m = builtins.match "(.*\n)?TTYPath=([^\n]*)(\n.*)?" extra;
-    in
-    if config.services.journald.console != "" then
-      config.services.journald.console
-    else if lib.hasInfix "ForwardToConsole=yes" extra && m != null then
-      lib.elemAt m 1
+    if hasSettings then
+      (if yes (journal.ForwardToConsole or false) then journal.TTYPath or "/dev/console" else null)
     else
-      null;
+      let
+        extra = config.services.journald.extraConfig;
+        m = builtins.match "(.*\n)?TTYPath=([^\n]*)(\n.*)?" extra;
+      in
+      if config.services.journald.console != "" then
+        config.services.journald.console
+      else if lib.hasInfix "ForwardToConsole=yes" extra && m != null then
+        lib.elemAt m 1
+      else
+        null;
 in
 
 {

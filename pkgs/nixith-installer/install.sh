@@ -44,6 +44,8 @@ set -euo pipefail
 : "${NI_LOADER:=systemd-boot}"  # systemd-boot limine grub refind (UEFI)
 : "${NI_KERNEL:=linuxPackages}"  # pkgs.<this>: linuxPackages_latest, _zen...
 : "${NI_INIT:=s6}"            # s6 dinit runit openrc finit (nixithos.init)
+: "${NI_CHANNEL:=stable}"     # stable | unstable: the nixpkgs of the system
+: "${NI_PINS:=}"              # where the tree's nixpkgs*.json are (the installer sets it)
 : "${NI_UNFREE:=0}"
 : "${NI_NM_KEEP:=}"          # NetworkManager profiles to keep, a file a line
 : "${NI_DRY:=0}"
@@ -67,6 +69,14 @@ esac
 case $NI_INIT in
     s6 | dinit | runit | openrc | finit) ;;
     *) fail "NI_INIT: $NI_INIT is not an init system of NixithOS (s6, dinit, runit, openrc, finit)" ;;
+esac
+case $NI_CHANNEL in
+    stable) pin= ;;
+    unstable)
+        pin=$NI_PINS/nixpkgs-unstable.json
+        [ -e "$pin" ] || [ "$NI_DRY" = 1 ] || fail "NI_CHANNEL=unstable: no $pin (NI_PINS)"
+        ;;
+    *) fail "NI_CHANNEL: $NI_CHANNEL is not a release of NixithOS (stable, unstable)" ;;
 esac
 case $NI_FS in
     ext4 | btrfs) ;;
@@ -366,7 +376,13 @@ EOF
 
 version() {
     local v
-    v=$(nixith version 2> /dev/null || echo 26.05)
+    if [ -n "$pin" ] && [ -e "$pin" ]; then
+        v=$(sed -n 's/.*"release": *"\([0-9.]*\)".*/\1/p' "$pin")
+    elif [ -n "$pin" ]; then
+        v=26.11
+    else
+        v=$(nixith version 2> /dev/null || echo 26.05)
+    fi
     echo "${v:0:5}"
 }
 
@@ -467,8 +483,15 @@ run nixith generate-config --root "$root"
 if [ "$NI_DRY" = 1 ]; then
     echo "== $root/etc/nixith/configuration.nix"
     config
+    if [ -n "$pin" ]; then echo "== $root/etc/nixith/nixpkgs.json: a copy of $pin"; fi
 else
     config > "$root/etc/nixith/configuration.nix"
+    # the release: `nixith install` and every later `nixith switch` build
+    # with the nixpkgs this file names (`nixith channel` changes it)
+    if [ -n "$pin" ]; then
+        install -m 0644 "$pin" "$root/etc/nixith/nixpkgs.json"
+        echo "nixpkgs: $(tr -d '\n' < "$pin")"
+    fi
     sed 's/^/  /' "$root/etc/nixith/configuration.nix" | grep -v 'HashedPassword'
 fi
 

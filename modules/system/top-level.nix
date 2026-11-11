@@ -35,7 +35,10 @@ let
 
     printf "%s " "''${extraDependencies[@]}" > "$out/extra-dependencies"
 
-    ${lib.optionalString (!config.boot.isContainer && config.boot.bootspec.enable) ''
+    ${lib.optionalString (
+      # (always there from nixpkgs 26.11 on, where the option is gone)
+      !config.boot.isContainer && (lib.versionAtLeast lib.trivial.release "26.11" || config.boot.bootspec.enable)
+    ) ''
       ${config.boot.bootspec.writer}
       ${lib.optionalString config.boot.bootspec.enableValidation ''${config.boot.bootspec.validator} "$out/${config.boot.bootspec.filename}"''}
     ''}
