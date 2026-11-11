@@ -349,6 +349,10 @@ $ sudo nixith channel unstable     # writes /etc/nixith/nixpkgs.json
 $ sudo nixith boot && reboot       # a change of release is best booted into
 ```
 
+On s6 it has to be booted into: 26.11 has s6-rc 0.7, which cannot read the
+live service database of the s6-rc 0.6 that runs a 26.05 system, so
+`nixith switch` to the other release refuses and says so.
+
 nixpkgs 26.11 has dropped the scripted initrd, which is what stage 1 is here.
 The halves of its modules that fed it (LUKS, LVM, the file systems, software
 RAID, the console font and keymap) are kept in

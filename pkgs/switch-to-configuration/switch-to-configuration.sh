@@ -199,7 +199,17 @@ if [[ $running_init == dinit ]]; then
   done <<< "$listing"
   is_up() { dname "$1"; [[ $up == *" $DN "* ]]; }
 else
-  up=$(s6-rc -b -a list 2>/dev/null) || { echo "s6-rc is not answering" >&2; exit 1; }
+  up=$(s6-rc -b -a list 2>/dev/null) || {
+    # The s6-rc of the new system reads the live database of the running one.
+    # Another release of s6-rc (0.6 -> 0.7, between nixpkgs 26.05 and 26.11)
+    # has another format: then the running system's own s6-rc still answers.
+    if /run/current-system/sw/bin/s6-rc -b -a list >/dev/null 2>&1; then
+      echo "the s6-rc of the new configuration cannot read the service database of the running system (another version of s6-rc): it cannot be switched to while this one runs.  Make it the boot default instead and reboot: nixith boot" >&2
+    else
+      echo "s6-rc is not answering" >&2
+    fi
+    exit 1
+  }
   up=" ${up//$'\n'/ } "
   is_up() { [[ $up == *" $1 "* ]]; }
 fi
