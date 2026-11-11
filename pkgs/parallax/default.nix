@@ -22,6 +22,9 @@
   pipewire,
   pixman,
   libdisplay-info,
+  # (smithay's libdisplay-info-sys 0.3 wants < 0.4; a nixpkgs that has moved on
+  # keeps this one next to it)
+  libdisplay-info_0_3 ? null,
   xwayland,
   dbus,
   openxr-loader,
@@ -75,7 +78,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     seatd
     pipewire
     pixman
-    libdisplay-info
+    (if libdisplay-info_0_3 != null then libdisplay-info_0_3 else libdisplay-info)
   ];
 
   # (build.rs asks git for the commit; there is no .git here)
