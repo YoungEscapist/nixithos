@@ -7,12 +7,18 @@ final: prev: {
   # anything else.  Bump the version/checksum pair here when a newer release
   # comes out; `curl -s https://downloads.claude.ai/claude-code-releases/<ver>/manifest.json`
   # has the per-platform checksums.
-  claude-code = prev.claude-code.override {
-    manifest = {
-      version = "2.1.302";
-      platforms."linux-x64".checksum = "60d7eb7f12fbb28a52533fe8be5884097403562aa02dc73991a021c7067e29a5";
-    };
-  };
+  # (only over an older one: nixos-unstable has a newer release, and another
+  # layout of the manifest)
+  claude-code =
+    if final.lib.versionOlder prev.claude-code.version "2.1.302" then
+      prev.claude-code.override {
+        manifest = {
+          version = "2.1.302";
+          platforms."linux-x64".checksum = "60d7eb7f12fbb28a52533fe8be5884097403562aa02dc73991a021c7067e29a5";
+        };
+      }
+    else
+      prev.claude-code;
 
   # s6-ftrigrd keeps its listeners in a list.  A one-shot listener whose
   # event came was forgotten by the protocol layer (skalibs' sassserver) but
