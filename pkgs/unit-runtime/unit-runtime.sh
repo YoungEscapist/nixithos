@@ -231,12 +231,16 @@ sv_status() {
   return 0
 }
 
-# Is the process of ATOM running?
+# Is the process of ATOM running?  (Under Finit too, the processes of a
+# service run under unit-supervise, whose status is there to read; Finit is
+# asked about an atom that has none.)
 rt_up() {
-  if [[ -r /run/units/.db/finit-names.tsv ]]; then
+  if [[ $RT_INIT == dinit ]] && sv_status "$1"; then
+    (( sv_up ))
+  elif [[ -r /run/units/.db/finit-names.tsv ]]; then
     [[ $(finit_status "$1" | jq -r '.status' 2>/dev/null) == running ]]
   elif [[ $RT_INIT == dinit ]]; then
-    sv_status "$1" && (( sv_up ))
+    return 1
   else
     [[ $(s6-svstat -o up "$RT_SCANDIR/$1" 2>/dev/null) == true ]]
   fi
@@ -244,11 +248,11 @@ rt_up() {
 
 # The process of ATOM, or nothing
 rt_pid() {
-  if [[ -r /run/units/.db/finit-names.tsv ]]; then
+  if [[ $RT_INIT == dinit ]] && sv_status "$1"; then
+    printf '%s' "$sv_pid"
+  elif [[ -r /run/units/.db/finit-names.tsv ]]; then
     finit_status "$1" | jq -r 'select(.status == "running") | .pid // empty' 2>/dev/null
-  elif [[ $RT_INIT == dinit ]]; then
-    sv_status "$1" && printf '%s' "$sv_pid"
-  else
+  elif [[ $RT_INIT != dinit ]]; then
     s6-svstat -o pid "$RT_SCANDIR/$1" 2>/dev/null
   fi
   return 0
@@ -2146,13 +2150,14 @@ cmd_device_watch() {
     action=add
     finish_event
   done < <(udevadm info --export-db 2>/dev/null | awk -v us="$us" '
+    function val() { return substr($0, index($0, "=") + 1) }
     /^P: / { p = substr($0, 4); next }
-    /^E: DEVNAME=/ { n = substr($0, 11); next }
-    /^E: DEVLINKS=/ { l = substr($0, 12); next }
-    /^E: INTERFACE=/ { i = substr($0, 13); next }
-    /^E: SUBSYSTEM=/ { s = substr($0, 13); next }
-    /^E: SYSTEMD_WANTS=/ { w = substr($0, 17); next }
-    /^E: USEC_INITIALIZED=/ { t = substr($0, 20); next }
+    /^E: DEVNAME=/ { n = val(); next }
+    /^E: DEVLINKS=/ { l = val(); next }
+    /^E: INTERFACE=/ { i = val(); next }
+    /^E: SUBSYSTEM=/ { s = val(); next }
+    /^E: SYSTEMD_WANTS=/ { w = val(); next }
+    /^E: USEC_INITIALIZED=/ { t = val(); next }
     /^$/ { if (p != "") print p us n us l us i us s us w us t; p = n = l = i = s = w = t = "" }
     END { if (p != "") print p us n us l us i us s us w us t }')
   scanning=0

@@ -76,9 +76,9 @@ what starts after what by itself; the processes run under unit-supervise
 (started by start-stop-daemon, waited for by unit-svwait), and a logger is the
 producer's, as under runit.
 
-With --init finit, the experimental backend writes native Finit service/task
-stanzas and readiness conditions. Its current scope and limitations are in
-docs/finit.md.
+With --init finit, the services and tasks are Finit stanzas (finit/,
+services.conf), with conditions for what dinit has as depends-on, waits-for
+and after; see emit_finit and docs/finit.md.
 """
 
 import argparse
@@ -2461,7 +2461,32 @@ def openrc_script(args, em, name, a, props, deps):
 
 
 def emit_finit(args, ctx, em, boot_atoms):
-    """Experimental native Finit graph. User managers remain s6 trees."""
+    """finit/: the services and tasks of Finit, all in services.conf, which
+    /etc/finit.conf includes through /run/units/.db.  User managers remain
+    s6 trees.
+
+    Finit starts a stanza once all of its conditions are asserted.  The
+    states it asserts itself (service/X/ready, task/X/success) never come
+    for a unit that fails, so they cannot stand for systemd's edges: a unit
+    wanted by multi-user.target that fails would hold back the target, and
+    the end of the boot, for good.  Each atom asserts a condition of its own
+    instead, usr/sHASH, once it is done trying - a task once it has run, a
+    service once it is ready or has exited (ready: and post: scripts) - and
+    what comes after it waits for that, whatever the outcome:
+
+      Requires= (depends-on)  waits for it, then does not run if it did not
+                              come up (the run script reads how it did in
+                              /run/units/.finit-rc)
+      Wants= (waits-for)      waits for it
+      After= alone            waits for it only if it is part of the boot
+
+    Those conditions are links to Finit's reconf file, as `initctl cond set`
+    makes them: they stay asserted across `initctl reload`, so what depends
+    on a unit is neither paused nor stopped when the configuration is read
+    again or the unit is restarted.  finit-deps.tsv lists the requirements
+    and wants of each atom for finitctl, which starts them first and stops
+    what requires an atom along with it, as dinit does.
+    """
     out = os.path.join(args.out, "finit")
     os.makedirs(out, exist_ok=True)
     active = set(boot_atoms)
@@ -2473,39 +2498,125 @@ def emit_finit(args, ctx, em, boot_atoms):
                 active.add(dep)
                 pending.append(dep)
 
+    def digest(name):
+        return hashlib.sha256(name.encode()).hexdigest()
+
     def ident(name):
         # Native names cannot contain Finit's :instance or condition syntax.
-        return "n-" + hashlib.sha256(name.encode()).hexdigest()[:20]
+        return "n-" + digest(name)[:20]
 
-    def ready(name):
-        a = em.atoms[name]
-        return ("service/%s/ready" if a["d"]["type"] == "process" else "task/%s/success") % ident(name)
+    def settled(name):
+        # (the hash of ident(), shorter: Finit's conditions are short)
+        return "usr/s" + digest(name)[:12]
+
+    cond_dir = "/run/finit/cond"
+    # How each atom is doing, by native name: 0 once a task has run through
+    # or a service is ready, anything else once it failed or is down.  (Not
+    # Finit's own task/X/success, which goes as soon as a task started by
+    # hand is halted again, nor service/X/ready, which is in flux while
+    # Finit reads its configuration again - a switch.)
+    results = "/run/units/.finit-rc"
+
+    def check(name):
+        return "[[ $(cat %s/%s 2> /dev/null) == 0 ]]" % (results, ident(name))
+
+    # ready: and post: of every service, with SERVICE_NAME=n-HASH (and, for
+    # post:, EXIT_CODE): the atom is done trying, and up or down.  A task
+    # has noted how it went itself (`settle task`).  The condition is
+    # created once, never replaced, so that Finit sees no change of it.
+    settle = os.path.join(args.final_out, "finit", "settle")
+    write(os.path.join(out, "settle"), "\n".join([
+        "#!%s" % args.bash,
+        "if [[ ${1-} != task ]]; then",
+        "\tmkdir -p %s; if [[ -n ${EXIT_CODE-} ]]; then echo 1; else echo 0; fi > %s/$SERVICE_NAME" % (results, results),
+        "fi",
+        "n=${SERVICE_NAME#n-}",
+        "c=%s/usr/s${n:0:12}" % cond_dir,
+        "[[ -L $c ]] || ln -s %s/reconf \"$c\" 2>/dev/null" % cond_dir,
+        "exit 0", ""]), 0o755)
+
+    # (The scripts are named after the native names: Finit's parser would
+    # take the backslashes out of a unit name, dev-disk-by\x2dlabel-….)
+
+    # (a barrier's task: BARRIER COND, the condition it asserts)
+    barrier = os.path.join(args.final_out, "finit", "barrier")
+    write(os.path.join(out, "barrier"), "\n".join([
+        "#!%s" % args.bash,
+        "c=%s/usr/$1" % cond_dir,
+        "[[ -L $c ]] || ln -s %s/reconf \"$c\" 2>/dev/null" % cond_dir,
+        "exit 0", ""]), 0o755)
 
     lines = []
+    barriers = set()
     # Finit 4.17 stores conditions in a 192-byte field, separately from
     # its 1024-byte input line. Leave room for NUL and future modifiers.
     def conditions(name, deps):
-        conds = [ready(dep) for dep in sorted(deps)]
+        conds = [settled(dep) for dep in sorted(deps)]
         depth = 0
         while len(",".join(conds)) > 160:
+            # (as many as fit in one barrier task, each waiting for its share)
+            chunks = [[]]
+            for c in conds:
+                if chunks[-1] and len(",".join(chunks[-1] + [c])) > 160:
+                    chunks.append([])
+                chunks[-1].append(c)
+            # A barrier asserts a condition of its own, as an atom does: one
+            # named after what it waits for, so that it is the same barrier
+            # in every configuration that has it, and stays asserted across
+            # a switch that removes it and one that brings it back (Finit's
+            # task/X/success would go with the stanza, and what waits for
+            # it would be stopped).
             reduced = []
-            for i in range(0, len(conds), 3):
-                title = ident("barrier-%s-%d-%d" % (name, depth, i))
-                lines.append("task [2345] name:%s remain:yes <!%s> %s -c true" %
-                             (title, ",".join(conds[i:i+3]), args.bash))
-                reduced.append("task/%s/success" % title)
+            for chunk in chunks:
+                key = "barrier:" + ",".join(chunk)
+                cond = "usr/b" + digest(key)[:12]
+                if cond not in barriers:
+                    barriers.add(cond)
+                    lines.append("task [2345] name:%s remain:yes <!%s> %s %s %s" % (
+                        ident(key), ",".join(chunk), args.bash, barrier, cond[4:]))
+                reduced.append(cond)
             conds = reduced
             depth += 1
         return "<!%s>" % ",".join(conds)
 
+    deps_table = []
     for name, a in sorted(em.atoms.items()):
         props = a["d"]
-        deps = a["deps"] | a["waits"]
+        hard = set(a["hard"])
+        wants = {d for d in a["deps"] - hard if ctx.edge_strength.get((name, d), 0) == 2} | a["waits"]
         # Ordering-only edges only matter for services actually in this boot.
-        deps = {d for d in deps if d in active or d in a["hard"] | a["waits"]}
-        cond = conditions(name, deps)
+        after = {d for d in a["deps"] - hard - wants if d in active}
+        cond = conditions(name, hard | wants | after)
         manual = "" if name in active else " manual:yes"
+        deps_table.append("%s\t%s\t%s\n" % (dname(name), " ".join(dname(d) for d in sorted(hard)),
+                                             " ".join(dname(d) for d in sorted(wants))))
         script = ["#!%s" % args.bash]
+        if props["type"] != "process":
+            # (a task is done trying once Finit has taken note of how it
+            # went, not before: until then systemctl does not see it as done.
+            # Finit does that when this script has exited, and of a task
+            # started by hand it does not keep the note for long: a moment
+            # after the exit, it is done either way.)
+            outcome = "%s/task/%s/" % (cond_dir, ident(name))
+            script += [
+                "settled() {",
+                "\tmkdir -p %s; echo \"$1\" > %s/%s" % (results, results, ident(name)),
+                "\tSERVICE_NAME=%s setsid -f %s -c %s settle $$ < /dev/null > /dev/null 2>&1" % (ident(name), sq(args.bash), sq(
+                    "while kill -0 $1; do sleep 0.02; done; "
+                    "for (( i = 0; i < 20; i++ )); do [[ -e %ssuccess || -e %sfailure ]] && break; sleep 0.05; done; exec %s task"
+                    % (outcome, outcome, settle))),
+                "}"]
+        if hard:
+            # (a requirement that did not come up: this does not run, and
+            # what requires this does not either)
+            for dep in sorted(hard):
+                script += [
+                    "if ! %s; then" % check(dep),
+                    "\techo %s >> %s" % (sq("%s: a dependency failed: %s" % (a["unit"], dep)), sq(args.catchall_log)),
+                ]
+                if props["type"] != "process":
+                    script.append("\tsettled 1")
+                script += ["\texit 1", "fi"]
         if props["type"] == "process":
             notified = "ready-notification" in props
             if notified:
@@ -2518,23 +2629,36 @@ def emit_finit(args, ctx, em, boot_atoms):
             else:
                 script.append("exec >> %s 2>&1" % sq(args.catchall_log))
             script.append("exec " + props["command"])
-            command = "%s %s%s" % (args.bash, os.path.join(args.final_out, "finit", "run-" + name), " %n" if notified else "")
-            line = "service [2345] name:%s%s notify:%s norestart kill:60 %s %s" % (
-                ident(name), manual, "s6" if notified else "none", cond, command)
+            command = "%s %s%s" % (args.bash, os.path.join(args.final_out, "finit", "run-" + ident(name)), " %n" if notified else "")
+            line = "service [2345] name:%s%s notify:%s norestart kill:60 ready:%s post:%s %s %s" % (
+                ident(name), manual, "s6" if notified else "none", settle, settle, cond, command)
         else:
             command = props.get("command", args.bash + " -c true")
             script.append("exec >> %s 2>&1" % sq(args.catchall_log))
-            script.append("exec " + command)
+            script += [command, "rc=$?", "settled $rc", "exit $rc"]
+            # (what takes it down - socket-down, mount-down, ExecStop= of a
+            # oneshot that remains: finitctl stop runs it, after Finit has
+            # stopped the task; a task's post: script would run as soon as
+            # the task is done)
+            if "stop-command" in props:
+                write(os.path.join(out, "stop-" + ident(name)), "\n".join([
+                    "#!%s" % args.bash,
+                    "echo 1 > %s/%s" % (results, ident(name)),
+                    "exec >> %s 2>&1" % sq(args.catchall_log),
+                    "exec " + props["stop-command"], ""]), 0o755)
             line = "task [2345] name:%s%s remain:yes %s %s %s" % (
-                ident(name), manual, cond, args.bash, os.path.join(args.final_out, "finit", "run-" + name))
-        write(os.path.join(out, "run-" + name), "\n".join(script) + "\n", 0o755)
+                ident(name), manual, cond, args.bash, os.path.join(args.final_out, "finit", "run-" + ident(name)))
+        write(os.path.join(out, "run-" + ident(name)), "\n".join(script) + "\n", 0o755)
         write(os.path.join(out, dname(name)), line + "\n")
         lines.append(line)
-    bootconds = conditions("boot", set(boot_atoms))
+    # (the boot is over once everything it pulls in is done trying: the
+    # targets too, which are not all among the units of default.target)
+    bootconds = conditions("boot", active)
     lines.append("task [2345] name:nixith-boot remain:yes %s %s booted" % (bootconds, args.runtime))
     write(os.path.join(out, "services.conf"), "\n".join(lines) + "\n")
     write(os.path.join(args.out, "finit-names.tsv"), "".join(
         "%s\t%s\n" % (dname(name), ident(name)) for name in sorted(em.atoms)))
+    write(os.path.join(args.out, "finit-deps.tsv"), "".join(deps_table))
     write(os.path.join(args.out, "names.tsv"), "".join(
         "%s\t%s\n" % (name, dname(name)) for name in sorted(em.atoms)))
 

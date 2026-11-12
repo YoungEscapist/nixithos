@@ -247,9 +247,9 @@ static const struct opt inits[] = {
     { "openrc", "OpenRC",
       "OpenRC as PID 1 and service manager, with parallel startup ordered by dependencies. The same NixOS units, systemctl and logs; user services run on s6.",
       "OpenRC как PID 1 и менеджер служб, с параллельным запуском по зависимостям. Те же юниты NixOS, systemctl и журналы; пользовательские службы работают на s6." },
-    { "finit", "Finit (experimental)",
-      "Finit 4.17 as PID 1 and service manager. It boots the compiled NixOS services; live configuration switching is not implemented yet. Choose it only for testing.",
-      "Finit 4.17 как PID 1 и менеджер служб. Запускает собранные службы NixOS; переключение конфигурации в работающей системе пока не реализовано. Выбирайте только для проверки." },
+    { "finit", "Finit",
+      "Finit 4.17 as PID 1 and service manager: small and fast, with services started as their conditions are met. The same NixOS units, systemctl and logs; user services run on s6.",
+      "Finit 4.17 как PID 1 и менеджер служб: небольшой и быстрый, службы запускаются по мере выполнения их условий. Те же юниты NixOS, systemctl и журналы; пользовательские службы работают на s6." },
 };
 #define NINITS (int)(sizeof inits / sizeof *inits)
 
@@ -1231,8 +1231,8 @@ static int step_welcome(void)
     int sel = ru;
     struct menu m = {
         .title = T("Welcome to NixithOS", "Добро пожаловать в NixithOS"),
-        .intro = T("NixOS without systemd: the same packages and configuration, with s6, dinit, runit, OpenRC or experimental Finit running the system. Choose the language of the installer.",
-                   "NixOS без systemd: те же пакеты и конфигурация, а систему запускает s6, dinit, runit, OpenRC или экспериментальный Finit. Выберите язык установщика."),
+        .intro = T("NixOS without systemd: the same packages and configuration, with s6, dinit, runit, OpenRC or Finit running the system. Choose the language of the installer.",
+                   "NixOS без systemd: те же пакеты и конфигурация, а систему запускает s6, dinit, runit, OpenRC или Finit. Выберите язык установщика."),
         .art = art, .nart = nart, .items = langs, .n = 2,
         .keys = "↑↓  Enter  F10",
     };
@@ -2618,8 +2618,8 @@ static int step_kernel(void)
 static int step_init(void)
 {
     return choose(T("Init system", "Init-система"),
-                  T("What starts the system and runs its services. Finit is experimental; it boots the current configuration but live switching is not implemented yet.",
-                    "То, что запускает систему и её службы. Finit экспериментальный: запускает выбранную конфигурацию, но переключение на ходу пока не работает."),
+                  T("What starts the system and runs its services. It can be changed later in the configuration.",
+                    "То, что запускает систему и её службы. Потом его можно сменить в конфигурации."),
                   inits, NINITS, &S.init);
 }
 

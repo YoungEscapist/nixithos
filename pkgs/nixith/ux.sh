@@ -99,11 +99,12 @@ live_db() {
     if [ -n "${NIXITH_DB:-}" ]; then
         # (a database to look in, not the live one: for tests)
         WHY_DB=$NIXITH_DB
-        WHY_INIT=$(if [ -d /run/units/.db/openrc ]; then echo openrc; elif [ -d /run/units/.db/runit ]; then echo runit; elif [ -L /run/units/.db ]; then echo dinit; else echo s6; fi)
+        WHY_INIT=$(if [ -d /run/units/.db/openrc ]; then echo openrc; elif [ -d /run/units/.db/runit ]; then echo runit; elif [ -d /run/units/.db/finit ]; then echo finit; elif [ -L /run/units/.db ]; then echo dinit; else echo s6; fi)
     elif [ -L /run/units/.db ] && [ ! -e /run/s6-rc/compiled ]; then
         WHY_INIT=dinit
         [ -d /run/units/.db/runit ] && WHY_INIT=runit
         [ -d /run/units/.db/openrc ] && WHY_INIT=openrc
+        [ -d /run/units/.db/finit ] && WHY_INIT=finit
         WHY_DB=$(readlink -f /run/units/.db)
     elif [ -e /run/s6-rc/compiled ]; then
         WHY_INIT=s6
@@ -206,6 +207,9 @@ why_unit() {
         elif [ "$WHY_INIT" = runit ]; then
             dname "$a"
             "$rcctl" -p /run/rcctl status "$DN" 2>&1 | sed "s|^|        |" || true
+        elif [ "$WHY_INIT" = finit ]; then
+            dname "$a"
+            "$finitctl" status "$DN" 2>&1 | sed "s|^|        |" || true
         elif [ "$WHY_INIT" = dinit ]; then
             dname "$a"
             "$dinitctl" -p /run/dinitctl status "$DN" 2>&1 | sed "s|^|        |" || true

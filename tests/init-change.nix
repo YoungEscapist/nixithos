@@ -1,8 +1,8 @@
 # The init system of an installed system is changed in its configuration
 # (`nixithos.init`), like anything else: `nixith boot` builds the system with
 # the other one and makes it the boot default, and after a reboot that one
-# runs the machine.  Here an installation on s6 goes to dinit, runit and
-# OpenRC in turn and back to s6, booting through its boot loader each time;
+# runs the machine.  Here an installation on s6 goes to dinit, runit, OpenRC
+# and Finit in turn and back to s6, booting through its boot loader each time;
 # the systems are specialisations of the first, as in the boot assessment
 # tests.  A `switch` to another init system applies the rest of the
 # configuration and says that the init system itself takes a reboot.
@@ -20,7 +20,7 @@
       boot.loader.systemd-boot.enable = true;
       boot.loader.timeout = 0;
 
-      specialisation = lib.genAttrs [ "dinit" "runit" "openrc" ] (init: {
+      specialisation = lib.genAttrs [ "dinit" "runit" "openrc" "finit" ] (init: {
         configuration = {
           nixithos.init = lib.mkForce init;
           environment.etc."init-marker".text = "${init}\n";
@@ -33,7 +33,7 @@
     ''
       assert "${nodes.machine.nixithos.init}" == "s6", "the test starts from s6"
 
-      PID1 = {"s6": "s6-svscan", "dinit": "dinit", "runit": "runit", "openrc": "openrc-init"}
+      PID1 = {"s6": "s6-svscan", "dinit": "dinit", "runit": "runit", "openrc": "openrc-init", "finit": "finit"}
 
       def running(init):
           machine.wait_for_unit("multi-user.target")
@@ -55,7 +55,7 @@
       running("s6")
       base = machine.succeed("readlink -f /run/booted-system").strip()
 
-      for init in ("dinit", "runit", "openrc"):
+      for init in ("dinit", "runit", "openrc", "finit"):
           with subtest(f"{init}: built from the configuration, the boot default, runs after a reboot"):
               top = machine.succeed(f"readlink -f {base}/specialisation/{init}").strip()
               generation(top, "boot")
@@ -68,9 +68,9 @@
 
       with subtest("switch to another init system: the configuration now, the init system at the next boot"):
           out = generation(base, "switch")
-          assert "the new configuration is for s6, and openrc runs this machine" in out and "next boot" in out, out
+          assert "the new configuration is for s6, and finit runs this machine" in out and "next boot" in out, out
           machine.fail("test -e /etc/init-marker")
-          machine.succeed("grep -q openrc-init /proc/1/cmdline")
+          machine.succeed("grep -q finit /proc/1/cmdline")
           machine.reboot()
           running("s6")
           machine.shutdown()

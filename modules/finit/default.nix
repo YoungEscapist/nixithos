@@ -1,4 +1,16 @@
-# Experimental Finit backend: native tasks/conditions and supervision.
+# Finit as init and service manager (nixithos.init = "finit").
+#
+#   PID 1          Finit, which stage 2 hands over to through `init` below
+#   services       the stanzas unitc writes from the system's units
+#                  (finit/services.conf in the unit database), included by
+#                  /etc/finit.conf through /run/units/.db, the database of
+#                  the configuration that runs; a switch points the link at
+#                  another one and has Finit read it again (finitctl rescan)
+#   control        finitctl, which answers for Finit what dinitctl is asked
+#                  by systemctl, the runtime and switch-to-configuration
+#   shutdown       `systemctl poweroff` and friends go to `initctl`; Finit
+#                  stops the services and runs s6.init.finalCommands
+#
 # Per-user managers remain s6; no native getty/hotplug plugins are used.
 { config, lib, pkgs, ... }:
 let
@@ -31,12 +43,14 @@ in {
       readiness none
       rcsd /run/units/finit.d
       shutdown ${final}
+      # Ctrl-Alt-Del reboots, as under systemd and the other init systems
+      # (Finit itself only asserts the condition)
+      task [12345] <!sys/key/ctrlaltdel> name:ctrlaltdel ${finit}/sbin/initctl reboot
       include /run/units/.db/finit/services.conf
     '';
     environment.systemPackages = [ pkgs.nixithos.finitCtl (pkgs.runCommand "finit-tools" {} ''
       mkdir -p $out/bin
       ln -s ${finit}/sbin/initctl $out/bin/initctl
     '') ];
-    warnings = [ "The finit backend is experimental: optional failure propagation and live configuration switches are not validated yet." ];
   };
 }

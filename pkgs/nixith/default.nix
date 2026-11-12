@@ -55,6 +55,7 @@ replaceVarsWith {
     dinitctl = "${dinit}/bin/dinitctl";
     rcctl = "${nixithos.unitTools}/bin/unit-rc";
     openrcctl = "${nixithos.openrcCtl}/bin/openrcctl";
+    finitctl = "${nixithos.finitCtl}/bin/finitctl";
     ux = "${./ux.sh}";
   };
 

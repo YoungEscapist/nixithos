@@ -522,6 +522,9 @@
         elif init == "dinit":
             machine.succeed("rm /run/t-hooks.stop && dinitctl stop --force t-hooks && test -e /run/t-hooks.stop")
             machine.succeed("dinitctl start t-hooks && systemctl is-active t-hooks")
+        elif init == "finit":
+            machine.succeed("rm /run/t-hooks.stop && finitctl stop --force t-hooks && test -e /run/t-hooks.stop")
+            machine.succeed("finitctl start t-hooks && systemctl is-active t-hooks")
         else:
             machine.succeed("rm /run/t-hooks.stop && s6-rc -d change t-hooks && test -e /run/t-hooks.stop")
             machine.succeed("s6-rc -u change t-hooks-hooks && systemctl is-active t-hooks")
@@ -542,7 +545,7 @@
         machine.succeed("systemctl stop t-forking")
         machine.fail("kill -0 $(cat /run/t-forking.pid)")
 
-    if init == "openrc":
+    if init in ("openrc", "finit"):
         with subtest("try-restart from a restricted caller keeps supervisor privileges"):
             old_pid = read("/run/t-owned-notify/pid")
             machine.succeed("setpriv --bounding-set=-chown -- systemctl try-restart t-owned-notify.service")

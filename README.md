@@ -4,8 +4,8 @@
 
 <p align="center"><img src="branding/nixithos.png" alt="NixithOS" width="420"></p>
 
-NixOS without systemd: choose s6, dinit, runit or OpenRC as the init system
-and service manager; experimental Finit is available for testing. Devices are managed by `eudev`, logs by `s6-log`.
+NixOS without systemd: choose s6, dinit, runit, OpenRC or Finit as the init
+system and service manager. Devices are managed by `eudev`, logs by `s6-log`.
 The default is `s6-linux-init` with `s6-rc`.
 
 This is not a rewritten distribution but a layer on top of ordinary nixpkgs
@@ -97,7 +97,7 @@ processes run under `unit-supervise`, which does for them what
 rest of the configuration at once and the init system at the next boot.
 An installed system changes its init the same way: the line in
 `/etc/nixith/configuration.nix`, `sudo nixith boot` and a reboot (the test
-`init-change` takes one installation through dinit, runit and OpenRC and back
+`init-change` takes one installation through dinit, runit, OpenRC and Finit and back
 to s6).
 
 ```console
@@ -156,13 +156,29 @@ $ openrcctl list | head -3
 [{+}     ] dbus
 ```
 
-### Finit (experimental)
+### Finit, the fifth
 
-`nixithos.init = "finit";` runs Finit 4.17 as PID 1. NixOS service definitions
-are translated into Finit tasks and supervised services. Boot, shutdown and
-basic service controls are tested. Live configuration switching is not
-implemented, and optional dependency failure semantics are not fully validated;
-this choice is intended for testing. See [docs/finit.md](docs/finit.md).
+`nixithos.init = "finit";` makes Finit 4.17 PID 1 and the service manager.
+`unitc --init finit` writes the units as Finit stanzas, a `service` for each
+process (under `unit-supervise`, as with dinit) and a `task` for each oneshot,
+target, mount or socket. Finit starts a stanza once its conditions are met;
+each unit asserts one of its own once it is done trying, so what systemd calls
+`Requires=`, `Wants=` and `After=` keeps its meaning, a failed requirement
+included, and a failing unit does not hold back the boot. `finitctl list`,
+`finitctl start …` are the commands of `dinitctl` over Finit's `initctl`,
+which `systemctl` and `switch-to-configuration` use; a switch moves the link
+`/run/units/.db` and has Finit read its configuration again. The managers of
+users stay s6 trees. The unit tests run on it as `nix-build -A finit.boot` and
+so on; see [docs/finit.md](docs/finit.md).
+
+```console
+$ cat /proc/1/comm
+init
+$ finitctl list | grep -E ' (dbus|nscd|multi-user.target)$'
+[{+}     ] dbus
+[{+}     ] multi-user.target
+[{+}     ] nscd
+```
 
 ## What replaces what
 
@@ -472,7 +488,7 @@ the stable release the image is made of, or unstable (26.11), which is
 downloaded whole. The kernel step offers the long-term one
 NixOS uses by default (it is on the image), the newest, the older long-term
 6.12 or 6.6, Zen or XanMod (`boot.kernelPackages`; all of them come from the
-NixOS cache). After it comes the init system: s6, dinit, runit, OpenRC or Finit (experimental)
+NixOS cache). After it comes the init system: s6, dinit, runit, OpenRC or Finit
 (`nixithos.init`). Nothing is written until the summary is confirmed; then [install.sh](pkgs/nixith-installer/install.sh)
 partitions the disk (GPT: a 1 GiB EFI partition, or a BIOS boot partition,
 and ext4 or btrfs for the rest) or takes what is mounted on `/mnt`, writes

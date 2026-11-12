@@ -48,13 +48,6 @@ EOF
     exit 1 ;;
 esac
 
-# Finit is currently a boot-only experimental backend. Do not partially
-# activate a generation until its configuration reconciliation is tested.
-if [[ $action == switch || $action == test ]] && [[ -d /run/units/.db/finit ]]; then
-  echo "Finit live activation is not implemented yet; use nixith boot and reboot." >&2
-  exit 1
-fi
-
 STATE=/run/units
 SCAN=/run/service
 
@@ -433,8 +426,10 @@ if [[ $running_init == dinit ]]; then
     ln -sfn "$new_db" "$STATE/.db"
     ln -sfn "$new_db" /nix/var/nix/gcroots/units-live 2>/dev/null
     # (unit-rc: a runsv for each process of the new database, none for those
-    # that are gone; OpenRC: the dependencies of the new scripts)
-    [[ $running_kind == runit || $running_kind == openrc ]] && "${DINITCTL[@]}" --quiet rescan
+    # that are gone; OpenRC: the dependencies of the new scripts; Finit: the
+    # services of the new database, those that are gone stopped)
+    # Finit: its configuration, read again (finitctl rescan waits for it)
+    [[ $running_kind == runit || $running_kind == openrc || $running_kind == finit ]] && "${DINITCTL[@]}" --quiet rescan
     # What dinit has loaded and is described differently now is read again;
     # what is gone is unloaded once nothing refers to it any more.
     gone=()

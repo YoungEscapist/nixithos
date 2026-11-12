@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>NixithOS</title>
-<meta name="description" content="NixithOS: NixOS без systemd, на s6, dinit, runit, OpenRC или экспериментальный Finit. Те же пакеты nixpkgs и та же конфигурация.">
+<meta name="description" content="NixithOS: NixOS без systemd, на s6, dinit, runit, OpenRC или Finit. Те же пакеты nixpkgs и та же конфигурация.">
 <link rel="icon" type="image/png" href="../favicon.png">
 <link rel="alternate" hreflang="en" href="https://youngescapist.github.io/nixithos/">
 <link rel="alternate" hreflang="ru" href="https://youngescapist.github.io/nixithos/ru/">
@@ -34,7 +34,7 @@
       <div>
         <p class="eyebrow">nixpkgs 26.05 · s6 / dinit / runit / OpenRC / Finit* · x86_64</p>
         <h1>NixOS без&nbsp;systemd</h1>
-        <p class="lead">Те же пакеты nixpkgs и та же декларативная конфигурация. Систему запускает и держит s6, dinit, runit, OpenRC или экспериментальный Finit на выбор, а всё остальное остаётся как в NixOS.</p>
+        <p class="lead">Те же пакеты nixpkgs и та же декларативная конфигурация. Систему запускает и держит s6, dinit, runit, OpenRC или Finit на выбор, а всё остальное остаётся как в NixOS.</p>
         <div class="actions">
           <a class="btn primary" href="#download">Скачать ISO</a>
           <a class="btn ghost" href="https://github.com/YoungEscapist/nixithos">Исходники</a>
@@ -52,8 +52,8 @@
         <table>
           <thead><tr><th scope="col"></th><th scope="col">NixOS</th><th scope="col">NixithOS</th></tr></thead>
           <tbody>
-            <tr><td>PID 1</td><td>systemd</td><td>s6-svscan, dinit, runit, openrc-init или экспериментальный Finit</td></tr>
-            <tr><td>Службы</td><td>systemd-юниты</td><td>сервисы s6, dinit, runit, OpenRC или экспериментальный Finit; юниты модулей nixpkgs переводит <code>unitc</code></td></tr>
+            <tr><td>PID 1</td><td>systemd</td><td>s6-svscan, dinit, runit, openrc-init или finit</td></tr>
+            <tr><td>Службы</td><td>systemd-юниты</td><td>сервисы s6, dinit, runit, OpenRC или Finit; юниты модулей nixpkgs переводит <code>unitc</code></td></tr>
             <tr><td>Сеансы</td><td>systemd-logind</td><td>elogind</td></tr>
             <tr><td>Пересборка</td><td><code>nixos-rebuild switch</code></td><td><code>nixith switch</code>, можно частично через <code>--only</code></td></tr>
             <tr><td>Загрузчик</td><td>systemd-boot, GRUB</td><td>systemd-boot, GRUB, rEFInd, Limine</td></tr>
@@ -62,7 +62,7 @@
           </tbody>
         </table>
       </div>
-      <p class="note">Модули nixpkgs по-прежнему описывают службы как <code>systemd.services.*</code>. NixithOS собирает из этих описаний сервисы s6, dinit, runit, OpenRC или экспериментальный Finit, поэтому <code>services.openssh.enable = true</code> работает без правок. Какая init-система запускает машину — одна строка, <code>nixithos.init = "dinit";</code>, или шаг установщика.</p>
+      <p class="note">Модули nixpkgs по-прежнему описывают службы как <code>systemd.services.*</code>. NixithOS собирает из этих описаний сервисы s6, dinit, runit, OpenRC или Finit, поэтому <code>services.openssh.enable = true</code> работает без правок. Какая init-система запускает машину — одна строка, <code>nixithos.init = "dinit";</code>, или шаг установщика.</p>
     </section>
 
     <section id="nixith">
@@ -119,7 +119,7 @@
         </figure>
         <figure>
           <a href="../img/tui-init.webp"><img src="../img/tui-init.webp" width="1280" height="800" loading="lazy" alt="Шаг «Init-система»: выбран dinit, выше s6, внизу описание dinit"></a>
-          <figcaption><b>Init-система.</b> s6, dinit, runit, OpenRC или экспериментальный Finit. Finit экспериментальный и пока не поддерживает переключение конфигурации на ходу.</figcaption>
+          <figcaption><b>Init-система.</b> s6, dinit, runit, OpenRC или Finit.</figcaption>
         </figure>
         <figure>
           <a href="../img/tui-summary.webp"><img src="../img/tui-summary.webp" width="1280" height="800" loading="lazy" alt="Шаг «Итог»: все ответы, среди них init-система dinit, и диск, который будет стёрт"></a>

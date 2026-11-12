@@ -13,6 +13,7 @@ s6_rc=@s6rc@
 dinitctl=@dinitctl@
 rcctl=@rcctl@
 openrcctl=@openrcctl@
+finitctl=@finitctl@
 profiles=/nix/var/nix/profiles
 
 die() {

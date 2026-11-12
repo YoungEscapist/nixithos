@@ -5,7 +5,7 @@
 <p align="center"><img src="branding/nixithos.png" alt="NixithOS" width="420"></p>
 
 NixOS без systemd: init-система и менеджер служб на выбор — s6, dinit,
-runit или OpenRC; экспериментальный Finit доступен для испытаний. Устройствами управляет `eudev`, журналами — `s6-log`.
+runit, OpenRC или Finit. Устройствами управляет `eudev`, журналами — `s6-log`.
 По умолчанию используются `s6-linux-init` и `s6-rc`.
 
 Это не переписанный дистрибутив, а слой поверх обычного nixpkgs
@@ -97,7 +97,7 @@ Init-система — это настройка: `nixithos.init = "dinit";` (�
 остальную конфигурацию сразу, а саму init-систему — со следующей загрузки.
 Установленная система меняет init так же: строка в
 `/etc/nixith/configuration.nix`, `sudo nixith boot` и перезагрузка (тест
-`init-change` проводит одну установку через dinit, runit и OpenRC и обратно
+`init-change` проводит одну установку через dinit, runit, OpenRC и Finit и обратно
 на s6).
 
 ```console
@@ -156,13 +156,30 @@ $ openrcctl list | head -3
 [{+}     ] dbus
 ```
 
-### Finit (экспериментальный)
+### Finit, пятый
 
-`nixithos.init = "finit";` запускает Finit 4.17 как PID 1. Описания служб
-NixOS переводятся в задачи и службы Finit. Загрузка, выключение и базовое
-управление службами проверены. Переключение конфигурации на ходу ещё не
-реализовано, а отказ необязательных зависимостей проверен не полностью; этот
-вариант предназначен для испытаний. Подробности — в [docs/finit.md](docs/finit.md).
+`nixithos.init = "finit";` делает Finit 4.17 PID 1 и менеджером служб.
+`unitc --init finit` записывает юниты строфами Finit: `service` для каждого
+процесса (под `unit-supervise`, как с dinit) и `task` для каждого oneshot,
+target, mount и socket. Finit запускает строфу, когда выполнены её условия;
+каждый юнит выставляет своё условие, когда отработал, поэтому то, что systemd
+называет `Requires=`, `Wants=` и `After=`, сохраняет смысл, включая
+провалившуюся обязательную зависимость, а упавший юнит не задерживает
+загрузку. `finitctl list`, `finitctl start …` — команды `dinitctl` поверх
+`initctl` Finit, которыми пользуются `systemctl` и `switch-to-configuration`;
+переключение переставляет ссылку `/run/units/.db` и заставляет Finit
+перечитать конфигурацию. Менеджеры пользователей остаются деревьями s6.
+Тесты юнитов на нём: `nix-build -A finit.boot` и так далее; подробности — в
+[docs/finit.md](docs/finit.md).
+
+```console
+$ cat /proc/1/comm
+init
+$ finitctl list | grep -E ' (dbus|nscd|multi-user.target)$'
+[{+}     ] dbus
+[{+}     ] multi-user.target
+[{+}     ] nscd
+```
 
 ## Что вместо чего
 

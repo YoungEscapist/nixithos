@@ -47,7 +47,8 @@
         elif init == "finit":
             machine.succeed("readlink /proc/1/exe | grep -q -- '-finit-4.17/bin/finit$'")
             machine.succeed("test -s /run/units/.db/finit-names.tsv")
-            machine.succeed("initctl -j status | grep -q 'multi-user.target'")
+            line = machine.succeed("finitctl list | grep -F ' multi-user.target' || true").strip()
+            assert line == "[{+}     ] multi-user.target", line
             print(machine.succeed("initctl -j status"))
         elif init == "dinit":
             machine.succeed("grep -qx dinit /proc/1/comm")

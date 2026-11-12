@@ -9,6 +9,7 @@
   gnugrep,
   gnused,
   gawk,
+  jq,
   getent,
   s6,
   execline,
@@ -52,9 +53,12 @@ replaceVarsWith {
         nixithos.finitCtl
         nixithos.openrcCtl
         eudev
+        # (Finit's state of an atom without unit-supervise: initctl -j)
+        jq
       ]
       ++ lib.optional withDbus dbus
-    );
+    )
+    + ":${nixithos.finit}/sbin";
     sandbox = "${nixithos.unitSandbox}/bin/unit-sandbox";
     inherit
       logDir

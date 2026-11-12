@@ -83,7 +83,7 @@ let
   # ... and on the fourth (OpenRC)
   runOpenrc = runnerFor "replace" { init = "openrc"; };
 
-  # ... and on experimental Finit
+  # ... and on the fifth (Finit)
   runFinit = runnerFor "replace" { init = "finit"; };
 
   # nixpkgs with `nixos/lib/testing-python.nix` replaced.  Every test of
@@ -242,6 +242,16 @@ in
     control = ./tests/finit-control.nix;
     boot = ./tests/boot.nix;
     units = ./tests/units.nix;
+    switch = ./tests/switch.nix;
+    login = ./tests/login.nix;
+    elogind = ./tests/elogind.nix;
+    user-services = ./tests/user-services.nix;
+    sandbox = ./tests/sandbox.nix;
+    hardening = ./tests/hardening.nix;
+    timesync = ./tests/timesync.nix;
+    rollback-systemd-boot = ./tests/rollback-systemd-boot.nix;
+    rollback-grub = ./tests/rollback-grub.nix;
+    rollback-limine = ./tests/rollback-limine.nix;
   };
 
   dinit = lib.mapAttrs (_: runDinit) {
