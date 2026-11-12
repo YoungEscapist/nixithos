@@ -2510,15 +2510,21 @@ def emit_finit(args, ctx, em, boot_atoms):
         return "usr/s" + digest(name)[:12]
 
     cond_dir = "/run/finit/cond"
-    # How each atom is doing, by native name: 0 once a task has run through
-    # or a service is ready, anything else once it failed or is down.  (Not
-    # Finit's own task/X/success, which goes as soon as a task started by
-    # hand is halted again, nor service/X/ready, which is in flux while
-    # Finit reads its configuration again - a switch.)
+    # How each atom is doing, by native name: "-" while it is being started,
+    # 0 once a task has run through or a service is ready, anything else
+    # once it failed or is down; nothing for a task that has been stopped
+    # (or has not run).  (Not Finit's own task/X/success, which goes as soon
+    # as a task started by hand is halted again, nor service/X/ready, which
+    # is in flux while Finit reads its configuration again - a switch.)
     results = "/run/units/.finit-rc"
 
     def check(name):
-        return "[[ $(cat %s/%s 2> /dev/null) == 0 ]]" % (results, ident(name))
+        # (one that is on its way - started along with this one by a switch,
+        # say, whose done-trying condition is from an earlier run - is
+        # waited for)
+        f = "%s/%s" % (results, ident(name))
+        return ("{ r=; for (( i = 0; i < 900; i++ )); do r=$(cat %s 2> /dev/null); "
+                "[[ -n $r && $r != - ]] && break; sleep 0.1; done; [[ $r == 0 ]]; }" % f)
 
     # ready: and post: of every service, with SERVICE_NAME=n-HASH (and, for
     # post:, EXIT_CODE): the atom is done trying, and up or down.  A task
@@ -2590,7 +2596,8 @@ def emit_finit(args, ctx, em, boot_atoms):
         manual = "" if name in active else " manual:yes"
         deps_table.append("%s\t%s\t%s\n" % (dname(name), " ".join(dname(d) for d in sorted(hard)),
                                              " ".join(dname(d) for d in sorted(wants))))
-        script = ["#!%s" % args.bash]
+        script = ["#!%s" % args.bash,
+                  "mkdir -p %s; echo - > %s/%s" % (results, results, ident(name))]
         if props["type"] != "process":
             # (a task is done trying once Finit has taken note of how it
             # went, not before: until then systemctl does not see it as done.
@@ -2643,7 +2650,7 @@ def emit_finit(args, ctx, em, boot_atoms):
             if "stop-command" in props:
                 write(os.path.join(out, "stop-" + ident(name)), "\n".join([
                     "#!%s" % args.bash,
-                    "echo 1 > %s/%s" % (results, ident(name)),
+                    "rm -f %s/%s" % (results, ident(name)),
                     "exec >> %s 2>&1" % sq(args.catchall_log),
                     "exec " + props["stop-command"], ""]), 0o755)
             line = "task [2345] name:%s%s remain:yes %s %s %s" % (

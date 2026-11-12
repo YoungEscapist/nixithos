@@ -49,9 +49,10 @@ wait_state() {
     type=$(jq -r '.type' <<< "$state") || return $?
     state=$(jq -r '.status' <<< "$state") || return $?
     if [[ $goal == up && $type == task ]]; then
-      if [[ $state != @(running|active|waiting|starting|setup) && -r $results/$native ]]; then
-        [[ $(< "$results/$native") == 0 ]]
-        return
+      if [[ $state != @(running|active|waiting|starting|setup) && -r $results/$native && $(< "$results/$native") != - ]]; then
+        [[ $(< "$results/$native") == 0 ]] && return 0
+        echo "finitctl: $native failed" >&2
+        return 1
       fi
       sleep 0.1
       continue
@@ -62,7 +63,9 @@ wait_state() {
         "$ctl" cond get "service/$native/ready" && return 0
         ;;
       up:done|down:stopped|down:halted|down:done) return 0 ;;
-      up:failed|up:crashed|up:missing|up:dead|up:conflict) return 1 ;;
+      up:failed|up:crashed|up:missing|up:dead|up:conflict)
+        echo "finitctl: $native did not come up ($state)" >&2
+        return 1 ;;
     esac
     sleep 0.1
   done
@@ -104,18 +107,35 @@ case $cmd in
       hard[$atom]=${line%%$'\t'*} wants[$atom]=${line#*$'\t'}
     done < /run/units/.db/finit-deps.tsv
     while IFS=$'\t' read -r atom n; do native_of[$atom]=$n; done < /run/units/.db/finit-names.tsv
-    data=$(snapshot) || exit $?
-    while IFS=$'\t' read -r n st; do [[ -n $n ]] && status[$n]=$st; done \
-      < <(jq -r '.[] | [.identity, .status] | @tsv' <<< "$data")
+    # The status of every stanza for a stop or restart (what requires the
+    # atom is looked for among all of them).  A start asks about the atoms
+    # it comes across, one at a time: those that are up are not looked
+    # into, so that is a few, and a start is what a socket's first client
+    # waits for.
+    if [[ $cmd != start ]]; then
+      data=$(snapshot) || exit $?
+      while IFS=$'\t' read -r n st; do [[ -n $n ]] && status[$n]=$st; done \
+        < <(jq -r '.[] | [.identity, .status] | @tsv' <<< "$data")
+    fi
+    # (STATUS: what Finit says of ATOM; no subshell, so that it is asked once)
+    fetch() {
+      local n=${native_of[$1]-}
+      [[ -n $n ]] || { STATUS=; return; }
+      [[ -n ${status[$n]+set} ]] ||
+        status[$n]=$("$ctl" -j status "$n" 2>/dev/null | jq -r '.status // empty' 2>/dev/null)
+      STATUS=${status[$n]}
+    }
     # (what is up or on its way: running, done, waiting for its conditions)
-    is_on() { [[ ${status[${native_of[$1]}]-} == @(running|done|waiting|starting|setup) ]]; }
+    is_on() { fetch "$1"; [[ $STATUS == @(running|done|waiting|starting|setup) ]]; }
     start_deps() {
       local dep
       for dep in ${hard[$1]-} ${wants[$1]-}; do
         [[ -n ${seen[$dep]-} ]] && continue
         seen[$dep]=1
+        # (one that is up has what it needs up already)
+        is_on "$dep" && continue
         start_deps "$dep"
-        is_on "$dep" || "$ctl" start "${native_of[$dep]}" >/dev/null
+        "$ctl" start "${native_of[$dep]}" >/dev/null
       done
     }
     # the atoms that require $1 and are on, those furthest from it first
@@ -133,7 +153,8 @@ case $cmd in
     # stop command (socket-down, mount-down, ExecStop= of a oneshot that
     # remains) is run here, if the task had run.
     stop_one() {
-      local native=${native_of[$1]} was=${status[${native_of[$1]}]-} stop=/run/units/.db/finit/stop-${native_of[$1]}
+      local native=${native_of[$1]} was stop=/run/units/.db/finit/stop-${native_of[$1]}
+      fetch "$1"; was=$STATUS
       "$ctl" stop "$native" || return $?
       if [[ -x $stop && $was == @(done|running|active) ]]; then
         "$stop" || true
@@ -151,7 +172,8 @@ case $cmd in
     start_deps "$name"
     # (a task done already stays so, as a started service stays started;
     # one to run has the note of its last run removed, to wait for the next)
-    if [[ $cmd == start && ${status[$native]-} == done ]]; then exit 0; fi
+    fetch "$name"
+    if [[ $cmd == start && $STATUS == done ]]; then exit 0; fi
     # (Finit drops a start that comes while the stanza is being stopped -
     # a socket's next client right after `systemctl stop`: the stop is
     # waited for first)

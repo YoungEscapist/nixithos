@@ -60,7 +60,11 @@ Two things about Finit 4.17 that the adapter works around:
 - `initctl status` walks the services through one iterator in PID 1 shared
   by all clients, so two walks at a time take services from each other.
   `finitctl` takes its snapshots under a lock and takes one again when it
-  lacks services.
+  lacks services. `initctl status NAME` walked them all too, to count the
+  instances of NAME first; the package is patched to ask for a name without
+  `:ID` directly (`pkgs/finit/initctl-status-find.patch`).
+- Run scripts are named after the native names (`n-HASH`): Finit's parser
+  takes the backslashes out of names such as `dev-disk-by\x2dlabel-ESP`.
 - PID 1 renames itself `init` (`/proc/1/comm`); `/proc/1/exe` is the Finit
   binary.
 

@@ -10,6 +10,9 @@ stdenv.mkDerivation (finalAttrs: {
     sha256 = "ca8b489a0ed99c17c0288e9e65e325a8f14af3734dfecf58f516c0a6f884e903";
   };
 
+  # (initctl status NAME: one request instead of a walk of every stanza)
+  patches = [ ./initctl-status-find.patch ];
+
   nativeBuildInputs = [ pkg-config ];
   buildInputs = [ libite libuev libcap ];
   configureFlags = [

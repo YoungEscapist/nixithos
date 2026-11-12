@@ -1,0 +1,26 @@
+--- a/src/initctl.c
++++ b/src/initctl.c
+@@ -1299,6 +1299,15 @@
+ 		char uptm[42] = "N/A";
+ 		char *pidfn = NULL;
+ 
++		/*
++		 * NixithOS: a name without an :ID is looked up directly.  Counting
++		 * the instances first walks every stanza, one request each, through
++		 * the one iterator that all clients share - slow, and a walk going
++		 * on at the same time loses stanzas to it.
++		 */
++		if (!strchr(arg, ':') && (svc = client_svc_find(arg)))
++			goto found;
++
+ 		for (svc = client_svc_iterator(1); svc; svc = client_svc_iterator(0))
+ 			num += svc_compare(svc, arg);
+ 
+@@ -1306,6 +1315,7 @@
+ 			break;
+ 
+ 		svc = client_svc_find(arg);
++	found:
+ 		if (!svc)
+ 			ERRX(noerr ? 0 : 69, "no such task or service(s): %s", arg);
+ 
